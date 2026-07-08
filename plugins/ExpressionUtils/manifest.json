@@ -1,0 +1,14 @@
+{
+    "name": "ExpressionUtils",
+    "description": "Steal/download/copy stickers or emojis",
+    "authors": [
+        {
+            "name": "fshin",
+            "id": "1381008677301129257"
+        }
+    ],
+    "main": "src/index.ts",
+    "vendetta": {
+        "icon": "ic_mention_24px"
+    }
+}
