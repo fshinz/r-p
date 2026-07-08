@@ -1,4 +1,5 @@
-import { findByProps, findByPropsLazy, findByStoreName } from "@vendetta/metro";
+import { findByProps } from "@metro";
+import { findByPropsLazy, findByStoreName } from "@metro/wrappers";
 
 export const Surrogates = findByPropsLazy("convertSurrogateToName")?.();
 export const LazyActionSheet = findByPropsLazy("hideActionSheet")?.();
