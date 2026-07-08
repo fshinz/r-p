@@ -1,8 +1,8 @@
-import { after, instead } from "@vendetta/api/patcher";
-import { showToast } from "@vendetta/api/ui/toasts";
-import { findByProps, findByStoreName } from "@vendetta/metro";
-import { clipboard, React, ReactNative } from "@vendetta/metro/common";
-import { Button } from "@vendetta/metro/common/components";
+import { after, instead } from "@api/patches";
+import { showToast } from "@ui/toasts";
+import { findByProps, findByStoreName } from "@metro";
+import { clipboard, ReactNative } from "@metro/common";
+import { Button } from "@metro/common/components";
 
 const { hideActionSheet } = findByProps("hideActionSheet") ?? {};
 const UserSettingsProtoStore = findByStoreName("UserSettingsProtoStore");
