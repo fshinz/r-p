@@ -1,7 +1,7 @@
-import { after, before } from "@vendetta/api/patcher";
-import { findInReactTree } from "@vendetta/utils";
-import { findByProps } from "@vendetta/metro";
-import { React } from "@vendetta/metro/common";
+import { after, before } from "@api/patches";
+import findInReactTree from "@utils/findInReactTree";
+import { findByProps } from "@metro";
+import { React } from "@metro/common";
 
 import StealButtons from "./ui/components/StealButtons";
 
@@ -25,7 +25,6 @@ function patchSheet(funcName: string, sheetModule: any, once: boolean) {
             emoji.animated = args[0].emoji.animated;
         } else {
             const match = /\/emojis\/(\d+)\.(gif|png)/.exec(emojiNode.src);
-
             if (match) {
                 emoji.id = match[1];
                 emoji.animated = match[2] === "gif";
@@ -92,9 +91,7 @@ export default function patchMessageEmojiActionSheet() {
                     "MessageEmojiActionSheet",
                     "MessageCustomEmojiActionSheet",
                 ].includes(name)
-            ) {
-                return;
-            }
+            ) return;
 
             unpatchLazy();
 
@@ -110,7 +107,6 @@ export default function patchMessageEmojiActionSheet() {
 
     return () => {
         unpatchLazy();
-
         patches.forEach((p) => p?.());
     };
 }
