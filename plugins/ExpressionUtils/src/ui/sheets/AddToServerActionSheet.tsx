@@ -1,9 +1,7 @@
-import { hideSheet, showSheet } from "@vendetta/api/ui/sheets";
-import { findByProps } from "@vendetta/metro";
-import { constants, ReactNative as RN } from "@vendetta/metro/common";
-import { ActionSheet, Text, TextInput } from "@vendetta/metro/common/components";
-import { useState } from "react";
-import { ScrollView, View } from "react-native";
+import { hideSheet, showSheet } from "@ui/sheets";
+import { findByProps } from "@metro";
+import { constants, ReactNative as RN } from "@metro/common";
+import { ActionSheet, Text, TextInput } from "@metro/common/components";
 
 import { GuildStore, PermissionsStore } from "../../modules";
 import AddToServerRow from "../components/AddToServerRow";
