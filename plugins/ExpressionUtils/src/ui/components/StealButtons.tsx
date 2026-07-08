@@ -1,6 +1,6 @@
-import { showToast } from "@vendetta/api/ui/toasts";
-import { clipboard, React, ReactNative } from "@vendetta/metro/common";
-import { Button } from "@vendetta/metro/common/components";
+import { showToast } from "@ui/toasts";
+import { clipboard, ReactNative } from "@metro/common";
+import { Button } from "@metro/common/components";
 
 import { downloadMediaAsset, LazyActionSheet } from "../../modules";
 import { showAddToServerActionSheet } from "../sheets/AddToServerActionSheet";
