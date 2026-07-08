@@ -1,6 +1,6 @@
-import { showToast } from "@ui/toasts";
-import { findByProps } from "@metro";
-import { ReactNative as RN } from "@metro/common";
+import { showToast } from "@vendetta/api/ui/toasts";
+import { findByProps } from "@vendetta/metro";
+import { ReactNative as RN } from "@vendetta/metro/common";
 
 import { Emojis } from "../../modules";
 
