@@ -1,112 +1,65 @@
-import { after, before } from "@api/patches";
-import findInReactTree from "@utils/findInReactTree";
-import { findByProps } from "@metro";
-import { React } from "@metro/common";
+import { after, before } from "@vendetta/api/patcher";
+import { findInReactTree } from "@vendetta/lib/utils/findInReactTree";
+import { findByProps } from "@vendetta/metro";
+import { React } from "@vendetta/metro/common";
 
 import StealButtons from "./ui/components/StealButtons";
 
-function patchSheet(funcName: string, sheetModule: any, once: boolean) {
-    const unpatch = after(funcName, sheetModule, (args: any[], res: any) => {
-        const emojiNode = args[0]?.emojiNode;
-        if (!emojiNode?.src) return;
-
-        const emoji: {
-            src: string;
-            id?: string;
-            name?: string;
-            animated?: boolean;
-        } = {
-            src: emojiNode.src,
-        };
-
-        if (args[0]?.emoji) {
-            emoji.id = args[0].emoji.id;
-            emoji.name = args[0].emoji.name;
-            emoji.animated = args[0].emoji.animated;
-        } else {
-            const match = /\/emojis\/(\d+)\.(gif|png)/.exec(emojiNode.src);
-            if (match) {
-                emoji.id = match[1];
-                emoji.animated = match[2] === "gif";
-            }
-        }
-
-        if (!emoji.name && emojiNode.alt) {
-            emoji.name = emojiNode.alt.replace(/:/g, "");
-        }
-
+function patchSheet(sheetModule: any) {
+    return after("default", sheetModule, (_args, res) => {
         const view = res?.props?.children?.props?.children;
         if (!view) return;
 
-        const unpatchView = after("type", view, (_: any, component: any) => {
+        const unpatchView = after("type", view, (_args, component) => {
             const isButton = (c: any) => c?.type?.name === "Button";
 
-            const buttonsContainer = findInReactTree(
+            const buttons = findInReactTree(
                 component,
                 (c: any) => Array.isArray(c) && c.some(isButton)
             );
 
-            if (buttonsContainer) {
-                const buttonIndex = buttonsContainer.findLastIndex(isButton);
+            if (!buttons) return;
 
-                if (buttonIndex >= 0) {
-                    buttonsContainer.splice(
-                        buttonIndex + 1,
-                        0,
-                        React.createElement(StealButtons, { emoji })
-                    );
-                } else {
-                    buttonsContainer.push(
-                        React.createElement(StealButtons, { emoji })
-                    );
-                }
-            } else if (component?.props?.children?.push) {
-                component.props.children.push(
-                    React.createElement(StealButtons, { emoji })
-                );
-            }
+            buttons.push(
+                React.createElement(StealButtons, {
+                    emoji: _args?.[0]?.emoji
+                })
+            );
+
+            unpatchView();
         });
-
-        if (once) {
-            unpatch();
-        }
     });
-
-    return unpatch;
 }
 
 export default function patchMessageEmojiActionSheet() {
-    const LazyActionSheet = findByProps("openLazy", "hideActionSheet");
+    const LazyActionSheet = findByProps(
+        "openLazy",
+        "hideActionSheet"
+    );
 
     if (!LazyActionSheet) return () => {};
 
-    const patches: Array<() => void> = [];
+    const patches: (() => void)[] = [];
 
-    const unpatchLazy = before(
+    const unpatch = before(
         "openLazy",
         LazyActionSheet,
         ([lazySheet, name]) => {
             if (
                 ![
                     "MessageEmojiActionSheet",
-                    "MessageCustomEmojiActionSheet",
+                    "MessageCustomEmojiActionSheet"
                 ].includes(name)
             ) return;
 
-            unpatchLazy();
-
             lazySheet.then((module: any) => {
-                patches.push(
-                    after("default", module, (_: any, res: any) => {
-                        patches.push(patchSheet("type", res, true));
-                    })
-                );
+                patches.push(patchSheet(module));
             });
         }
     );
 
     return () => {
-        unpatchLazy();
-        patches.forEach((p) => p?.());
+        unpatch();
+        patches.forEach(p => p());
     };
 }
