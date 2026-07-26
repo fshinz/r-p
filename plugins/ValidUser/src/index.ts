@@ -5,13 +5,8 @@ import { React } from "@vendetta/metro/common";
 import { findInReactTree } from "@vendetta/utils";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 
-const ActionSheet = findByProps(
-    "openLazy",
-    "hideActionSheet"
-);
-
-const { ActionSheetRow } =
-    findByProps("ActionSheetRow");
+const ActionSheet = findByProps("openLazy", "hideActionSheet");
+const { ActionSheetRow } = findByProps("ActionSheetRow");
 
 const MentionIcon =
     getAssetIDByName("ic_mention_24px") ??
@@ -21,102 +16,141 @@ const MentionIcon =
 const sleep = (ms: number) =>
     new Promise(resolve => setTimeout(resolve, ms));
 
-function extractIdsFromText(
-    text: string
-): string[] {
+function extractIdsFromText(text: string): string[] {
     if (!text) return [];
 
     return [
-        ...text.matchAll(/<@!?(\d+)>/g)
-    ].map(match => match[1]);
+        ...text.matchAll(/<@!?(\d{17,19})>/g)
+    ].map(x => x[1]);
 }
 
-function extractAllMentionIds(
-    message: any
-): string[] {
-    const ids = new Set<string>();
+function extractAllMentionIds(message: any): string[] {
+    const ids: string[] = [];
 
-    function scan(value: any) {
-        if (typeof value === "string") {
-            for (const id of extractIdsFromText(value)) {
-                ids.add(id);
+    if (message.content) {
+        ids.push(...extractIdsFromText(message.content));
+    }
+
+    if (
+        message.embeds &&
+        Array.isArray(message.embeds)
+    ) {
+        for (const embed of message.embeds) {
+            if (embed.rawTitle) {
+                ids.push(
+                    ...extractIdsFromText(embed.rawTitle)
+                );
             }
 
-            return;
-        }
-
-        if (Array.isArray(value)) {
-            for (const item of value) {
-                scan(item);
+            if (embed.rawDescription) {
+                ids.push(
+                    ...extractIdsFromText(
+                        embed.rawDescription
+                    )
+                );
             }
 
-            return;
-        }
-
-        if (
-            value &&
-            typeof value === "object"
-        ) {
-            for (
-                const child of Object.values(value)
+            if (
+                embed.fields &&
+                Array.isArray(embed.fields)
             ) {
-                scan(child);
+                for (const field of embed.fields) {
+                    if (field.name) {
+                        ids.push(
+                            ...extractIdsFromText(
+                                field.name
+                            )
+                        );
+                    }
+
+                    if (field.value) {
+                        ids.push(
+                            ...extractIdsFromText(
+                                field.value
+                            )
+                        );
+                    }
+                }
             }
         }
     }
 
-    scan(message.content);
-    scan(message.embeds);
-
-    return [...ids];
+    return [...new Set(ids)];
 }
 
-function isUserCached(
-    userId: string
-): boolean {
+function isUserCached(userId: string): boolean {
     const UserStore = findByProps(
         "getUser",
         "getCurrentUser"
     );
 
-    return !!UserStore?.getUser?.(
-        userId
+    const user = UserStore?.getUser?.(userId);
+
+    return !!user;
+}
+
+async function forceUIRefresh(
+    channelId: string,
+    messageId: string,
+    content: string
+) {
+    const Dispatcher = findByProps(
+        "dispatch",
+        "subscribe"
     );
+
+    const freshContent = content
+        ? content + " "
+        : " ";
+
+    Dispatcher.dispatch({
+        type: "MESSAGE_UPDATE",
+        message: {
+            id: messageId,
+            channel_id: channelId,
+            content: freshContent
+        }
+    });
+
+    await sleep(50);
+
+    Dispatcher.dispatch({
+        type: "MESSAGE_UPDATE",
+        message: {
+            id: messageId,
+            channel_id: channelId,
+            content: content
+        }
+    });
 }
 
 async function fetchUsersViaGateway(
     userIds: string[]
 ): Promise<boolean> {
-    const GatewayConnection =
-        findByProps(
-            "getGateway",
-            "send"
-        );
+    const GatewayConnection = findByProps(
+        "getGateway",
+        "send"
+    );
 
-    const SelectedGuildStore =
-        findByProps(
-            "getGuildId",
-            "getChannelId"
-        );
+    const SelectedGuildStore = findByProps(
+        "getGuildId",
+        "getChannelId"
+    );
 
     const currentGuildId =
         SelectedGuildStore?.getGuildId?.();
 
-    if (!currentGuildId) {
-        return false;
-    }
+    if (!currentGuildId) return false;
 
     const ws =
         GatewayConnection?.getGateway?.();
 
-    if (!ws) {
-        return false;
-    }
+    if (!ws) return false;
 
     ws.send(8, {
         guild_id: currentGuildId,
         user_ids: userIds,
-        presences: false,
+        presences: false
     });
 
     await sleep(400);
@@ -124,37 +158,35 @@ async function fetchUsersViaGateway(
     return true;
 }
 
-async function fetchUsersViaAPI(
-    userId: string,
-    token: string,
-    API: any,
-    Dispatcher: any
-) {
-    const cleanToken =
-        typeof token === "string"
-            ? token
-            : token?.token || "";
+async function fetchUser(userId: string) {
+    const Dispatcher = findByProps(
+        "dispatch",
+        "subscribe"
+    );
 
-    const res = await API.get({
-        url: `/users/${userId}`,
-        headers: {
-            Authorization:
-                cleanToken.trim(),
-        },
+    const RestAPI = findByProps(
+        "get",
+        "post",
+        "del",
+        "patch"
+    );
+
+    const res = await RestAPI.get({
+        url: `/users/${userId}`
     });
 
-    if (!res.body) {
-        throw new Error(
-            "Empty API response body"
-        );
+    if (res.body) {
+        Dispatcher.dispatch({
+            type: "USER_UPDATE",
+            user: res.body
+        });
+
+        return res.body.username;
     }
 
-    Dispatcher.dispatch({
-        type: "USER_UPDATE",
-        user: res.body,
-    });
-
-    return res.body.username;
+    throw new Error(
+        "Empty API response body"
+    );
 }
 
 async function fixUnknownMentions(
@@ -163,23 +195,53 @@ async function fixUnknownMentions(
     const ids =
         extractAllMentionIds(message);
 
-    if (ids.length === 0) {
-        return;
+    const channelId =
+        message.channel_id;
+
+    const messageId =
+        message.id;
+
+    if (ids.length === 0) return;
+
+    const uncachedIds: string[] = [];
+
+    for (const userId of ids) {
+        if (!isUserCached(userId)) {
+            uncachedIds.push(userId);
+        }
     }
 
-    const uncachedIds =
-        ids.filter(
-            userId =>
-                !isUserCached(userId)
-        );
+    const hasEmbeds =
+        Array.isArray(message.embeds) &&
+        message.embeds.length > 0;
 
+    /*
+     * If every user is already cached,
+     * only refresh normal messages.
+     *
+     * We intentionally do NOT refresh embeds
+     * because dispatching a partial MESSAGE_UPDATE
+     * can cause Discord to replace/remove embed data.
+     */
     if (uncachedIds.length === 0) {
+        if (
+            !hasEmbeds &&
+            channelId &&
+            messageId
+        ) {
+            await forceUIRefresh(
+                channelId,
+                messageId,
+                message.content
+            );
+        }
+
         return;
     }
 
     const BULK_THRESHOLD = 5;
 
-    let gatewaySuccess = false;
+    let success = false;
 
     const SelectedGuildStore =
         findByProps("getGuildId");
@@ -189,371 +251,230 @@ async function fixUnknownMentions(
             BULK_THRESHOLD &&
         SelectedGuildStore?.getGuildId?.()
     ) {
-        gatewaySuccess =
+        success =
             await fetchUsersViaGateway(
                 uncachedIds
             );
     }
 
-    if (gatewaySuccess) {
-        return;
-    }
+    if (!success) {
+        const safetyDelay =
+            uncachedIds.length > 10
+                ? 450
+                : 250;
 
-    const API =
-        findByProps("get", "post");
-
-    const Dispatcher =
-        findByProps(
-            "dispatch",
-            "subscribe"
-        );
-
-    const TokenStore =
-        findByProps("getToken");
-
-    const token =
-        TokenStore?.getToken?.();
-
-    if (!token) {
-        return;
-    }
-
-    const safetyDelay =
-        uncachedIds.length > 10
-            ? 450
-            : 250;
-
-    for (
-        let i = 0;
-        i < uncachedIds.length;
-        i++
-    ) {
-        const userId =
-            uncachedIds[i];
-
-        try {
-            await fetchUsersViaAPI(
-                userId,
-                token,
-                API,
-                Dispatcher
-            );
-        } catch (err) {
-            logger.error(
-                `[ValidUser] Fetch failed for ${userId}:`,
-                err
-            );
-        }
-
-        if (
-            i <
-            uncachedIds.length - 1
+        for (
+            let i = 0;
+            i < uncachedIds.length;
+            i++
         ) {
-            await sleep(
-                safetyDelay
-            );
+            const userId =
+                uncachedIds[i];
+
+            try {
+                await fetchUser(userId);
+            } catch (err) {
+                logger.error(
+                    `[ValidUser] Fetch Failed for ${userId}:`,
+                    err
+                );
+            }
+
+            if (
+                i <
+                uncachedIds.length - 1
+            ) {
+                await sleep(
+                    safetyDelay
+                );
+            }
         }
     }
-}
 
-const processingMessages =
-    new Set<string>();
-
-async function processMessage(
-    message: any
-) {
-    if (!message?.id) {
-        return;
-    }
-
-    const ids =
-        extractAllMentionIds(message);
-
-    if (ids.length === 0) {
-        return;
-    }
-
-    const uncachedIds =
-        ids.filter(
-            userId =>
-                !isUserCached(userId)
-        );
-
-    if (uncachedIds.length === 0) {
-        return;
-    }
-
-    const key =
-        `${message.channel_id}:${message.id}`;
-
+    /*
+     * Normal messages:
+     * fetch users → refresh UI.
+     *
+     * Embeds:
+     * fetch users → USER_UPDATE only.
+     *
+     * No partial MESSAGE_UPDATE is dispatched
+     * for embeds, preventing their content from
+     * being overwritten or disappearing.
+     */
     if (
-        processingMessages.has(key)
+        !hasEmbeds &&
+        channelId &&
+        messageId
     ) {
-        return;
-    }
-
-    processingMessages.add(key);
-
-    try {
-        await fixUnknownMentions(
-            message
+        await forceUIRefresh(
+            channelId,
+            messageId,
+            message.content
         );
-    } catch (err) {
-        logger.error(
-            "[ValidUser] Automatic fix failed:",
-            err
-        );
-    } finally {
-        processingMessages.delete(key);
     }
 }
-
-let unsubMessageCreate:
-    (() => void) | null = null;
-
-let unsubMessageUpdate:
-    (() => void) | null = null;
 
 let unpatchOpenLazy:
     (() => void) | null = null;
 
 export default {
     onLoad() {
-        const Dispatcher =
-            findByProps(
-                "dispatch",
-                "subscribe"
-            );
-
-        /*
-         * Automatically detect
-         * mentions in messages
-         * and embeds.
-         */
-        const onMessageCreate =
-            (payload: any) => {
-                const message =
-                    payload?.message;
-
-                if (!message) {
+        unpatchOpenLazy = before(
+            "openLazy",
+            ActionSheet,
+            ([comp, args, msg]) => {
+                if (
+                    args !==
+                        "MessageLongPressActionSheet" ||
+                    !msg?.message
+                ) {
                     return;
                 }
 
-                processMessage(
-                    message
-                );
-            };
-
-        const onMessageUpdate =
-            (payload: any) => {
                 const message =
-                    payload?.message;
+                    msg.message;
 
-                if (!message) {
+                const ids =
+                    extractAllMentionIds(
+                        message
+                    );
+
+                if (ids.length === 0) {
                     return;
                 }
 
-                processMessage(
-                    message
-                );
-            };
+                comp.then(
+                    (instance: any) => {
+                        const unpatch =
+                            after(
+                                "default",
+                                instance,
+                                (
+                                    _args: any,
+                                    component: any
+                                ) => {
+                                    React.useEffect(
+                                        () => () =>
+                                            unpatch(),
+                                        []
+                                    );
 
-        Dispatcher.subscribe(
-            "MESSAGE_CREATE",
-            onMessageCreate
-        );
-
-        Dispatcher.subscribe(
-            "MESSAGE_UPDATE",
-            onMessageUpdate
-        );
-
-        unsubMessageCreate =
-            () =>
-                Dispatcher.unsubscribe(
-                    "MESSAGE_CREATE",
-                    onMessageCreate
-                );
-
-        unsubMessageUpdate =
-            () =>
-                Dispatcher.unsubscribe(
-                    "MESSAGE_UPDATE",
-                    onMessageUpdate
-                );
-
-        /*
-         * Add manual action-sheet
-         * button.
-         */
-        unpatchOpenLazy =
-            before(
-                "openLazy",
-                ActionSheet,
-                ([comp, args, msg]) => {
-                    if (
-                        args !==
-                            "MessageLongPressActionSheet" ||
-                        !msg?.message
-                    ) {
-                        return;
-                    }
-
-                    const message =
-                        msg.message;
-
-                    const ids =
-                        extractAllMentionIds(
-                            message
-                        );
-
-                    if (
-                        ids.length === 0
-                    ) {
-                        return;
-                    }
-
-                    comp.then(
-                        (instance: any) => {
-                            const unpatch =
-                                after(
-                                    "default",
-                                    instance,
-                                    (
-                                        _args,
-                                        component
-                                    ) => {
-                                        React.useEffect(
-                                            () =>
-                                                () =>
-                                                    unpatch(),
-                                            []
+                                    const groups:
+                                        any[] =
+                                        findInReactTree(
+                                            component,
+                                            (c: any) =>
+                                                Array.isArray(
+                                                    c
+                                                ) &&
+                                                c[0]?.type
+                                                    ?.name ===
+                                                    "ActionSheetRowGroup"
                                         );
 
-                                        const groups =
+                                    if (
+                                        !groups?.length
+                                    ) {
+                                        return;
+                                    }
+
+                                    const fixButton =
+                                        React.createElement(
+                                            ActionSheetRow,
+                                            {
+                                                label:
+                                                    ids.length ===
+                                                    1
+                                                        ? "Fix Unknown Mention"
+                                                        : `Fix ${ids.length} Unknown Mentions`,
+
+                                                icon: React.createElement(
+                                                    ActionSheetRow.Icon,
+                                                    {
+                                                        source:
+                                                            MentionIcon
+                                                    }
+                                                ),
+
+                                                onPress:
+                                                    () => {
+                                                        ActionSheet.hideActionSheet();
+
+                                                        fixUnknownMentions(
+                                                            message
+                                                        );
+                                                    }
+                                            }
+                                        );
+
+                                    let inserted =
+                                        false;
+
+                                    for (
+                                        let gi = 0;
+                                        gi <
+                                        groups.length;
+                                        gi++
+                                    ) {
+                                        const groupChildren:
+                                            any[] =
                                             findInReactTree(
-                                                component,
+                                                groups[gi],
                                                 (c: any) =>
                                                     Array.isArray(
                                                         c
                                                     ) &&
-                                                    c[0]
-                                                        ?.type
-                                                        ?.name ===
-                                                        "ActionSheetRowGroup"
+                                                    c.some(
+                                                        (
+                                                            child: any
+                                                        ) =>
+                                                            child
+                                                                ?.type
+                                                                ?.name ===
+                                                            "ActionSheetRow"
+                                                    )
                                             );
 
                                         if (
-                                            !groups?.length
+                                            !groupChildren
                                         ) {
-                                            return;
+                                            continue;
                                         }
 
-                                        const fixButton =
-                                            React.createElement(
-                                                ActionSheetRow,
-                                                {
-                                                    label:
-                                                        ids.length ===
-                                                        1
-                                                            ? "Fix Unknown Mention"
-                                                            : `Fix ${ids.length} Unknown Mentions`,
+                                        groupChildren.unshift(
+                                            fixButton
+                                        );
 
-                                                    icon:
-                                                        React.createElement(
-                                                            ActionSheetRow.Icon,
-                                                            {
-                                                                source:
-                                                                    MentionIcon,
-                                                            }
-                                                        ),
+                                        inserted =
+                                            true;
 
-                                                    onPress:
-                                                        () => {
-                                                            ActionSheet.hideActionSheet();
-
-                                                            fixUnknownMentions(
-                                                                message
-                                                            );
-                                                        },
-                                                }
-                                            );
-
-                                        let inserted =
-                                            false;
-
-                                        for (
-                                            let gi = 0;
-                                            gi <
-                                            groups.length;
-                                            gi++
-                                        ) {
-                                            const groupChildren =
-                                                findInReactTree(
-                                                    groups[gi],
-                                                    (c: any) =>
-                                                        Array.isArray(
-                                                            c
-                                                        ) &&
-                                                        c.some(
-                                                            (
-                                                                child: any
-                                                            ) =>
-                                                                child
-                                                                    ?.type
-                                                                    ?.name ===
-                                                                "ActionSheetRow"
-                                                        )
-                                                );
-
-                                            if (
-                                                !groupChildren
-                                            ) {
-                                                continue;
-                                            }
-
-                                            groupChildren.unshift(
-                                                fixButton
-                                            );
-
-                                            inserted =
-                                                true;
-
-                                            break;
-                                        }
-
-                                        if (
-                                            !inserted
-                                        ) {
-                                            groups.unshift(
-                                                React.createElement(
-                                                    ActionSheetRow.Group,
-                                                    null,
-                                                    fixButton
-                                                )
-                                            );
-                                        }
+                                        break;
                                     }
-                                );
-                        }
-                    );
-                }
-            );
+
+                                    if (
+                                        !inserted
+                                    ) {
+                                        groups.unshift(
+                                            React.createElement(
+                                                ActionSheetRow.Group,
+                                                null,
+                                                fixButton
+                                            )
+                                        );
+                                    }
+                                }
+                            );
+                    }
+                );
+            }
+        );
     },
 
     onUnload() {
-        unsubMessageCreate?.();
-        unsubMessageCreate =
-            null;
-
-        unsubMessageUpdate?.();
-        unsubMessageUpdate =
-            null;
-
         unpatchOpenLazy?.();
+
         unpatchOpenLazy =
             null;
-
-        processingMessages.clear();
-    },
+    }
 };
