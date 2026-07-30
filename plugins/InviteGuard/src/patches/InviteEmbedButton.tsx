@@ -1,5 +1,5 @@
-import { findByProps, findByTypeName } from "@revenge-mod/metro";
-import { React, ReactNative } from "@revenge-mod/metro/common";
+import { findByProps } from "@vendetta/metro";
+import { React, ReactNative } from "@vendetta/metro/common";
 import { instead } from "@vendetta/patcher";
 import { storage } from "@vendetta/plugin";
 import { showToast } from "@vendetta/ui/toasts";
@@ -7,10 +7,10 @@ import { getAssetIDByName } from "@vendetta/ui/assets";
 
 // ─── Discord internals ───
 const GuildActions = findByProps("joinGuild", "acceptInvite");
-const ChannelActions = findByProps("selectChannel");
 const Navigation = findByProps("push", "pushLazy", "openURL");
 const { getInvite } = findByProps("getInvite", "resolveInvite") ?? {};
 const { showConfirmationAlert } = findByProps("showConfirmationAlert", "showAlert") ?? {};
+const { View, TouchableOpacity, Text } = ReactNative;
 
 // ─── Helpers ───
 
@@ -25,7 +25,6 @@ function joinGuild(inviteCode: string, lurker = false) {
         lurker ? `Lurking in ${inviteCode}` : `Joined ${inviteCode}`,
         getAssetIDByName("Check"),
       );
-      // Navigate to guild
       setTimeout(() => {
         const guildId = getInvite?.(inviteCode)?.guild?.id;
         if (guildId) Navigation?.push?.({ screen: "Guild", params: { guildId } });
@@ -78,24 +77,18 @@ function showInviteInfo(inviteCode: string) {
 // ─── The patch ───
 
 export default function patchInviteEmbed(): () => void {
-  // Try multiple ways to find Discord's internal invite embed component
+  // Find Discord's invite embed component
   const InviteEmbed =
-    findByTypeName("InviteEmbed") ??
-    findByTypeName("GuildInviteEmbed") ??
-    findByTypeName("ChannelInviteEmbed") ??
     findByProps("InviteEmbed", "renderInvite")?.InviteEmbed ??
-    findByProps("inviteEmbed", "InviteEmbed")?.inviteEmbed;
+    findByProps("inviteEmbed")?.inviteEmbed;
 
   if (!InviteEmbed?.type && !InviteEmbed?.render) {
     console.warn("[InviteGuard] Could not find InviteEmbed component");
     return () => {};
   }
 
-  // Determine the target: if it's a class/function component, patch .type or .render
   const target = InviteEmbed.type?.prototype ? InviteEmbed.type : InviteEmbed;
-  const method = target.render ? "render" : target.type?.render ? "render" : "type";
-
-  const { View, TouchableOpacity, Text } = ReactNative;
+  const method = target.render ? "render" : "type";
 
   return instead(
     method,
@@ -115,7 +108,7 @@ export default function patchInviteEmbed(): () => void {
       const inviteData = getInvite?.(inviteCode);
       const isAlreadyMember = inviteData?.guild?.joined ?? false;
 
-      // ── Build buttons from storage toggles ──
+      // Build buttons
       const buttons: React.ReactElement[] = [];
 
       if (storage.showJoinButton && !isAlreadyMember) {
@@ -133,9 +126,7 @@ export default function patchInviteEmbed(): () => void {
             }}
             activeOpacity={0.7}
           >
-            <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "600" }}>
-              Join
-            </Text>
+            <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "600" }}>Join</Text>
           </TouchableOpacity>,
         );
       }
@@ -155,9 +146,7 @@ export default function patchInviteEmbed(): () => void {
             }}
             activeOpacity={0.7}
           >
-            <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "600" }}>
-              Lurk
-            </Text>
+            <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "600" }}>Lurk</Text>
           </TouchableOpacity>,
         );
       }
@@ -180,9 +169,7 @@ export default function patchInviteEmbed(): () => void {
             }}
             activeOpacity={0.7}
           >
-            <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "600" }}>
-              Go to Server
-            </Text>
+            <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "600" }}>Go to Server</Text>
           </TouchableOpacity>,
         );
       }
@@ -202,9 +189,7 @@ export default function patchInviteEmbed(): () => void {
             }}
             activeOpacity={0.7}
           >
-            <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "600" }}>
-              Info
-            </Text>
+            <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "600" }}>Info</Text>
           </TouchableOpacity>,
         );
       }
@@ -216,7 +201,7 @@ export default function patchInviteEmbed(): () => void {
             onPress={() => blockInvite(inviteCode)}
             style={{
               backgroundColor: "#ED4245",
-              paddingHorizontal: 12,
+              paddingHorizontal: 10,
               paddingVertical: 6,
               borderRadius: 4,
               flex: 0,
@@ -224,14 +209,11 @@ export default function patchInviteEmbed(): () => void {
             }}
             activeOpacity={0.7}
           >
-            <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "600" }}>
-              ✕
-            </Text>
+            <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "600" }}>✕</Text>
           </TouchableOpacity>,
         );
       }
 
-      // Wrap original children + button row in Fragment
       return (
         <React.Fragment>
           {res}
@@ -252,4 +234,4 @@ export default function patchInviteEmbed(): () => void {
       );
     },
   );
-    }
+}
