@@ -6,7 +6,6 @@ let patches: (() => void)[] = [];
 
 export default {
   onLoad: () => {
-    // Init defaults
     storage.showJoinButton ??= true;
     storage.showLurkButton ??= true;
     storage.showInfoButton ??= true;
@@ -18,8 +17,10 @@ export default {
 
     // Auto-lurk stored guilds after load
     setTimeout(() => {
+      const GuildActions = findByProps?.("joinGuild", "acceptInvite");
+      if (!GuildActions) return;
       for (const gid of storage.autoLurkGuilds ?? []) {
-        if (gid?.trim()) GuildActions?.joinGuild?.(gid.trim(), { lurker: true });
+        if (gid?.trim()) GuildActions.joinGuild?.(gid.trim(), { lurker: true });
       }
     }, 3000);
   },
