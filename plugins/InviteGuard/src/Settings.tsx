@@ -2,10 +2,9 @@ import { storage } from "@vendetta/plugin";
 import { useProxy } from "@vendetta/storage";
 import { showToast } from "@vendetta/ui/toasts";
 import { getAssetIDByName } from "@vendetta/ui/assets";
-import { findByProps } from "@vendetta/metro";
 
 const React = require("react");
-const { ScrollView, View, Text, TouchableOpacity, TextInput, Switch } = require("react-native");
+const { ScrollView, View, Text, TouchableOpacity, TextInput } = require("react-native");
 
 export default function Settings() {
   useProxy(storage);
@@ -47,7 +46,7 @@ export default function Settings() {
     React.createElement(
       View,
       { style: { padding: 12 } },
-
+      
       // ─── SECTION: Button Toggles ───
       React.createElement(
         View,
@@ -55,7 +54,7 @@ export default function Settings() {
         React.createElement(
           Text,
           { style: { color: "#fff", fontSize: 17, fontWeight: "700", marginBottom: 12 } },
-          "Button Visibility",
+          "Button Visibility"
         ),
         ...toggles.map(({ label, key, color }) =>
           React.createElement(
@@ -82,7 +81,7 @@ export default function Settings() {
                   backgroundColor: color,
                 },
               }),
-              React.createElement(Text, { style: { color: "#fff", fontSize: 15 } }, label),
+              React.createElement(Text, { style: { color: "#fff", fontSize: 15 } }, label)
             ),
             React.createElement(
               TouchableOpacity,
@@ -105,10 +104,10 @@ export default function Settings() {
                   backgroundColor: "#fff",
                   alignSelf: storage[key] ? "flex-end" : "flex-start",
                 },
-              }),
-            ),
-          ),
-        ),
+              })
+            )
+          )
+        )
       ),
 
       // ─── SECTION: Auto-Lurk ───
@@ -118,7 +117,7 @@ export default function Settings() {
         React.createElement(
           Text,
           { style: { color: "#fff", fontSize: 17, fontWeight: "700", marginBottom: 10 } },
-          "Auto-Lurk Servers",
+          "Auto-Lurk Servers"
         ),
         React.createElement(
           View,
@@ -148,8 +147,8 @@ export default function Settings() {
                 justifyContent: "center",
               },
             },
-            React.createElement(Text, { style: { color: "#FFF", fontWeight: "600" } }, "Add"),
-          ),
+            React.createElement(Text, { style: { color: "#FFF", fontWeight: "600" } }, "Add")
+          )
         ),
         ...(storage.autoLurkGuilds ?? []).map((id: string) =>
           React.createElement(
@@ -176,10 +175,10 @@ export default function Settings() {
                   borderRadius: 4,
                 },
               },
-              React.createElement(Text, { style: { color: "#FFF", fontSize: 12 } }, "Remove"),
-            ),
-          ),
-        ),
+              React.createElement(Text, { style: { color: "#FFF", fontSize: 12 } }, "Remove")
+            )
+          )
+        )
       ),
 
       // ─── SECTION: Blocked Invites ───
@@ -189,13 +188,13 @@ export default function Settings() {
         React.createElement(
           Text,
           { style: { color: "#fff", fontSize: 17, fontWeight: "700", marginBottom: 10 } },
-          "Blocked Invites",
+          "Blocked Invites"
         ),
         ...((storage.blockedInvites ?? []).length === 0
           ? [React.createElement(
               Text,
               { key: "empty", style: { color: "#888", fontSize: 13 } },
-              "No blocked invites",
+              "No blocked invites"
             )]
           : (storage.blockedInvites ?? []).map((code: string) =>
               React.createElement(
@@ -213,7 +212,7 @@ export default function Settings() {
                 React.createElement(
                   Text,
                   { style: { flex: 1, fontSize: 14, fontFamily: "monospace", color: "#ccc" } },
-                  code,
+                  code
                 ),
                 React.createElement(
                   TouchableOpacity,
@@ -226,11 +225,11 @@ export default function Settings() {
                       borderRadius: 4,
                     },
                   },
-                  React.createElement(Text, { style: { color: "#FFF", fontSize: 12 } }, "Unblock"),
-                ),
-              ),
-            ),
-        ),
+                  React.createElement(Text, { style: { color: "#FFF", fontSize: 12 } }, "Unblock")
+                )
+              )
+            )
+        )
       ),
 
       // ─── SECTION: Clear All ───
@@ -248,9 +247,9 @@ export default function Settings() {
               borderRadius: 8,
             },
           },
-          React.createElement(Text, { style: { color: "#FFF", fontWeight: "700" } }, "Clear All Data"),
-        ),
-      ),
-    ),
+          React.createElement(Text, { style: { color: "#FFF", fontWeight: "700" } }, "Clear All Data")
+        )
+      )
+    )
   );
 }
