@@ -71,7 +71,9 @@ export default function Settings() {
                 borderBottomColor: "#3a3a3a",
               },
             },
-            React.createElement(View, { style: { flexDirection: "row", alignItems: "center", gap: 8 } },
+            React.createElement(
+              View,
+              { style: { flexDirection: "row", alignItems: "center", gap: 8 } },
               React.createElement(View, {
                 style: {
                   width: 10,
@@ -82,17 +84,19 @@ export default function Settings() {
               }),
               React.createElement(Text, { style: { color: "#fff", fontSize: 15 } }, label),
             ),
-            React.createElement(TouchableOpacity, {
-              onPress: () => { storage[key] = !storage[key]; },
-              style: {
-                width: 48,
-                height: 26,
-                borderRadius: 13,
-                backgroundColor: storage[key] ? "#3BA55D" : "#4E5058",
-                justifyContent: "center",
-                paddingHorizontal: 3,
+            React.createElement(
+              TouchableOpacity,
+              {
+                onPress: () => { storage[key] = !storage[key]; },
+                style: {
+                  width: 48,
+                  height: 26,
+                  borderRadius: 13,
+                  backgroundColor: storage[key] ? "#3BA55D" : "#4E5058",
+                  justifyContent: "center",
+                  paddingHorizontal: 3,
+                },
               },
-            },
               React.createElement(View, {
                 style: {
                   width: 20,
@@ -133,15 +137,17 @@ export default function Settings() {
             value: inviteInput,
             onChangeText: (v: string) => setInviteInput(v),
           }),
-          React.createElement(TouchableOpacity, {
-            onPress: addAutoLurk,
-            style: {
-              backgroundColor: "#5865F2",
-              paddingHorizontal: 14,
-              borderRadius: 6,
-              justifyContent: "center",
+          React.createElement(
+            TouchableOpacity,
+            {
+              onPress: addAutoLurk,
+              style: {
+                backgroundColor: "#5865F2",
+                paddingHorizontal: 14,
+                borderRadius: 6,
+                justifyContent: "center",
+              },
             },
-          },
             React.createElement(Text, { style: { color: "#FFF", fontWeight: "600" } }, "Add"),
           ),
         ),
@@ -159,15 +165,17 @@ export default function Settings() {
               },
             },
             React.createElement(Text, { style: { flex: 1, fontSize: 14, color: "#ccc" } }, id),
-            React.createElement(TouchableOpacity, {
-              onPress: () => removeAutoLurk(id),
-              style: {
-                backgroundColor: "#ED4245",
-                paddingHorizontal: 10,
-                paddingVertical: 4,
-                borderRadius: 4,
+            React.createElement(
+              TouchableOpacity,
+              {
+                onPress: () => removeAutoLurk(id),
+                style: {
+                  backgroundColor: "#ED4245",
+                  paddingHorizontal: 10,
+                  paddingVertical: 4,
+                  borderRadius: 4,
+                },
               },
-            },
               React.createElement(Text, { style: { color: "#FFF", fontSize: 12 } }, "Remove"),
             ),
           ),
@@ -207,15 +215,17 @@ export default function Settings() {
                   { style: { flex: 1, fontSize: 14, fontFamily: "monospace", color: "#ccc" } },
                   code,
                 ),
-                React.createElement(TouchableOpacity, {
-                  onPress: () => unblockInvite(code),
-                  style: {
-                    backgroundColor: "#3BA55D",
-                    paddingHorizontal: 10,
-                    paddingVertical: 4,
-                    borderRadius: 4,
+                React.createElement(
+                  TouchableOpacity,
+                  {
+                    onPress: () => unblockInvite(code),
+                    style: {
+                      backgroundColor: "#3BA55D",
+                      paddingHorizontal: 10,
+                      paddingVertical: 4,
+                      borderRadius: 4,
+                    },
                   },
-                },
                   React.createElement(Text, { style: { color: "#FFF", fontSize: 12 } }, "Unblock"),
                 ),
               ),
@@ -227,15 +237,17 @@ export default function Settings() {
       React.createElement(
         View,
         { style: { alignItems: "center", marginTop: 8 } },
-        React.createElement(TouchableOpacity, {
-          onPress: clearAll,
-          style: {
-            backgroundColor: "#ED4245",
-            paddingHorizontal: 20,
-            paddingVertical: 10,
-            borderRadius: 8,
+        React.createElement(
+          TouchableOpacity,
+          {
+            onPress: clearAll,
+            style: {
+              backgroundColor: "#ED4245",
+              paddingHorizontal: 20,
+              paddingVertical: 10,
+              borderRadius: 8,
+            },
           },
-        },
           React.createElement(Text, { style: { color: "#FFF", fontWeight: "700" } }, "Clear All Data"),
         ),
       ),
