@@ -1,18 +1,20 @@
-import { findByProps } from "@vendetta/metro";
-import { React, ReactNative } from "@vendetta/metro/common";
+import { findByProps, findByTypeName } from "@vendetta/metro";
 import { instead } from "@vendetta/patcher";
 import { storage } from "@vendetta/plugin";
 import { showToast } from "@vendetta/ui/toasts";
 import { getAssetIDByName } from "@vendetta/ui/assets";
+
+// React and React Native via require — works reliably in Hermes
+const React = require("react");
+const { View, TouchableOpacity, Text } = require("react-native");
 
 // ─── Discord internals ───
 const GuildActions = findByProps("joinGuild", "acceptInvite");
 const Navigation = findByProps("push", "pushLazy", "openURL");
 const { getInvite } = findByProps("getInvite", "resolveInvite") ?? {};
 const { showConfirmationAlert } = findByProps("showConfirmationAlert", "showAlert") ?? {};
-const { View, TouchableOpacity, Text } = ReactNative;
 
-// ─── Helpers ───
+// ─── Action helpers ───
 
 function joinGuild(inviteCode: string, lurker = false) {
   if (!GuildActions?.joinGuild) {
@@ -77,8 +79,11 @@ function showInviteInfo(inviteCode: string) {
 // ─── The patch ───
 
 export default function patchInviteEmbed(): () => void {
-  // Find Discord's invite embed component
+  // Try multiple patterns to find Discord's invite embed component
   const InviteEmbed =
+    findByTypeName("InviteEmbed") ??
+    findByTypeName("GuildInviteEmbed") ??
+    findByTypeName("ChannelInviteEmbed") ??
     findByProps("InviteEmbed", "renderInvite")?.InviteEmbed ??
     findByProps("inviteEmbed")?.inviteEmbed;
 
@@ -97,140 +102,143 @@ export default function patchInviteEmbed(): () => void {
       const props = args[0];
       const res = OriginalRender(...args);
 
+      // Bail if no children to inject into
       if (!res?.props?.children) return res;
 
       const inviteCode = props?.invite?.code ?? props?.code;
       if (!inviteCode) return res;
 
-      // If blocked, hide the embed entirely
+      // Hidden if blocked
       if (storage.blockedInvites?.includes(inviteCode)) return null;
 
       const inviteData = getInvite?.(inviteCode);
       const isAlreadyMember = inviteData?.guild?.joined ?? false;
 
-      // Build buttons
+      // ── Build buttons ──
       const buttons: React.ReactElement[] = [];
 
       if (storage.showJoinButton && !isAlreadyMember) {
         buttons.push(
-          <TouchableOpacity
-            key="join"
-            onPress={() => joinGuild(inviteCode, false)}
-            style={{
+          React.createElement(TouchableOpacity, {
+            key: "join",
+            onPress: () => joinGuild(inviteCode, false),
+            style: {
               backgroundColor: "#3BA55D",
               paddingHorizontal: 12,
               paddingVertical: 6,
               borderRadius: 4,
               flex: 1,
               alignItems: "center",
-            }}
-            activeOpacity={0.7}
-          >
-            <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "600" }}>Join</Text>
-          </TouchableOpacity>,
+            },
+            activeOpacity: 0.7,
+          }, React.createElement(Text, {
+            style: { color: "#FFF", fontSize: 13, fontWeight: "600" },
+          }, "Join")),
         );
       }
 
       if (storage.showLurkButton && !isAlreadyMember) {
         buttons.push(
-          <TouchableOpacity
-            key="lurk"
-            onPress={() => joinGuild(inviteCode, true)}
-            style={{
+          React.createElement(TouchableOpacity, {
+            key: "lurk",
+            onPress: () => joinGuild(inviteCode, true),
+            style: {
               backgroundColor: "#4E5058",
               paddingHorizontal: 12,
               paddingVertical: 6,
               borderRadius: 4,
               flex: 1,
               alignItems: "center",
-            }}
-            activeOpacity={0.7}
-          >
-            <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "600" }}>Lurk</Text>
-          </TouchableOpacity>,
+            },
+            activeOpacity: 0.7,
+          }, React.createElement(Text, {
+            style: { color: "#FFF", fontSize: 13, fontWeight: "600" },
+          }, "Lurk")),
         );
       }
 
       if (isAlreadyMember) {
         buttons.push(
-          <TouchableOpacity
-            key="goto"
-            onPress={() => {
+          React.createElement(TouchableOpacity, {
+            key: "goto",
+            onPress: () => {
               const guildId = inviteData?.guild?.id;
               if (guildId) Navigation?.push?.({ screen: "Guild", params: { guildId } });
-            }}
-            style={{
+            },
+            style: {
               backgroundColor: "#5865F2",
               paddingHorizontal: 12,
               paddingVertical: 6,
               borderRadius: 4,
               flex: 1,
               alignItems: "center",
-            }}
-            activeOpacity={0.7}
-          >
-            <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "600" }}>Go to Server</Text>
-          </TouchableOpacity>,
+            },
+            activeOpacity: 0.7,
+          }, React.createElement(Text, {
+            style: { color: "#FFF", fontSize: 13, fontWeight: "600" },
+          }, "Go to Server")),
         );
       }
 
       if (storage.showInfoButton) {
         buttons.push(
-          <TouchableOpacity
-            key="info"
-            onPress={() => showInviteInfo(inviteCode)}
-            style={{
+          React.createElement(TouchableOpacity, {
+            key: "info",
+            onPress: () => showInviteInfo(inviteCode),
+            style: {
               backgroundColor: "#4E5058",
               paddingHorizontal: 12,
               paddingVertical: 6,
               borderRadius: 4,
               flex: 1,
               alignItems: "center",
-            }}
-            activeOpacity={0.7}
-          >
-            <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "600" }}>Info</Text>
-          </TouchableOpacity>,
+            },
+            activeOpacity: 0.7,
+          }, React.createElement(Text, {
+            style: { color: "#FFF", fontSize: 13, fontWeight: "600" },
+          }, "Info")),
         );
       }
 
       if (storage.showBlockButton) {
         buttons.push(
-          <TouchableOpacity
-            key="block"
-            onPress={() => blockInvite(inviteCode)}
-            style={{
+          React.createElement(TouchableOpacity, {
+            key: "block",
+            onPress: () => blockInvite(inviteCode),
+            style: {
               backgroundColor: "#ED4245",
               paddingHorizontal: 10,
               paddingVertical: 6,
               borderRadius: 4,
               flex: 0,
               alignItems: "center",
-            }}
-            activeOpacity={0.7}
-          >
-            <Text style={{ color: "#FFF", fontSize: 13, fontWeight: "600" }}>✕</Text>
-          </TouchableOpacity>,
+            },
+            activeOpacity: 0.7,
+          }, React.createElement(Text, {
+            style: { color: "#FFF", fontSize: 13, fontWeight: "600" },
+          }, "✕")),
         );
       }
 
-      return (
-        <React.Fragment>
-          {res}
-          {buttons.length > 0 && (
-            <View
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-evenly",
-                paddingVertical: 6,
-                paddingHorizontal: 8,
-                gap: 6,
-              }}
-            >
-              {buttons}
-            </View>
-          )}
-        </React.Fragment>
+      // Inject children: original embed + button row
+      const existingChildren = Array.isArray(res.props.children)
+        ? res.props.children
+        : [res.props.children];
+
+      return React.createElement(
+        React.Fragment,
+        null,
+        ...existingChildren,
+        buttons.length > 0 &&
+          React.createElement(View, {
+            style: {
+              flexDirection: "row",
+              justifyContent: "space-evenly",
+              paddingVertical: 6,
+              paddingHorizontal: 8,
+              gap: 6,
+            },
+          }, ...buttons),
       );
     },
   );
