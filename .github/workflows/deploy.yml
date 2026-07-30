@@ -11,14 +11,14 @@ jobs:
           contents: write
 
         steps:
-            - uses: actions/checkout@v3
+            - uses: actions/checkout@v7
 
             - name: Prepare environment
-              uses: actions/setup-node@v3
+              uses: actions/setup-node@v7
               with:
-                  node-version: "22"
+                  node-version: "24"
 
-            - run: npm install --global pnpm
+            - run: npm install --global pnpm@10
 
             - name: Install deps
               run: pnpm m i
