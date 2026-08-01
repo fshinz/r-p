@@ -1,6 +1,5 @@
-// index.ts
 import { storage } from '@vendetta/plugin'
-import patchInviteEmbed from './patches/InviteEmbedPatch'  // ← This should match
+import patchInviteEmbed from './patches/InviteEmbedButton'  // ← Updated import
 import Settings from './Settings'
 
 let patches: (() => void)[] = []
