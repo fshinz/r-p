@@ -34,11 +34,11 @@ export default {
 
             if (!event || event.type !== "MESSAGE_DELETE" || !event?.id || !event?.channelId) return;
 
-            // Fetch cached message from store
+            // Retrieve cached message instance from MessageStore
             const message = MessageStore.getMessage(event.channelId, event.id);
-            if (!message) return;
+            if (!message) return; // Allow delete if not cached in memory
 
-            // Filters
+            // User & Bot filters
             if (storage.ignore.users.includes(message?.author?.id)) return;
             if (storage.ignore.bots && message?.author?.bot) return;
 
@@ -48,43 +48,31 @@ export default {
             }
             deleteable.push(event.id);
 
-            // Construct deleted timestamp tag
+            // Construct deletion timestamp notice
             let deletedNotice = " `[deleted]`";
             if (storage.timestamps) {
               deletedNotice = ` \`[deleted at ${moment().format(storage.ew ? "hh:mm:ss.SS a" : "HH:mm:ss.SS")}]\``;
             }
 
-            // Safely retrieve original content across different Discord RN record formats
-            const originalText = message.content ?? message.rawContent ?? "";
-
-            // Avoid double appending
+            // Preserve full original message content & append notice
+            const originalText = message.content || message.rawContent || "";
             if (!originalText.includes("`[deleted")) {
-              const newContent = (originalText ? originalText : "") + deletedNotice;
-              
-              // Apply content directly to record properties
-              try {
-                message.content = newContent;
-              } catch (_) {
-                // In case content is a read-only getter on frozen object
-                Object.defineProperty(message, "content", {
-                  value: newContent,
-                  writable: true,
-                  configurable: true,
-                  enumerable: true
-                });
-              }
+              message.content = originalText + deletedNotice;
             }
 
-            // Mark record as deleted for custom styling if supported
+            // Flag message as deleted internally
             message.deleted = true;
 
-            // Cancel the delete action for ALL listeners in Flux by changing action type
-            args[0] = {
-              type: "NO_OP_PREVENT_DELETE",
-              id: event.id,
-              channelId: event.channelId
-            };
+            // Preserve existing embeds and attachments in memory so they don't get stripped
+            if (message.embeds && Array.isArray(message.embeds)) {
+              message.embeds = [...message.embeds];
+            }
+            if (message.attachments && Array.isArray(message.attachments)) {
+              message.attachments = [...message.attachments];
+            }
 
+            // Mute the deletion event type so MessageStore and UI stores ignore the deletion
+            event.type = "NODELETE_PREVENT_DELETE";
             return args;
           } catch (e) {
             console.error("[NoDelete+ -> Dispatcher error]", e);
