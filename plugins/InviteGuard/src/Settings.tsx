@@ -1,9 +1,8 @@
-// Settings.tsx
 import { components, React, ReactNative } from '@revenge-mod/metro/common'
 import { storage } from '@vendetta/plugin'
 import { useProxy } from '@vendetta/storage'
 import { getAssetIDByName } from '@vendetta/ui/assets'
-import { updateInviteEmbed } from './patches/InviteEmbedPatch'
+import { updateInviteEmbed } from './patches/InviteEmbedButton'
 
 const { TableRowGroup, TableSwitchRow, TableRowIcon, Stack } = components
 const { ScrollView } = ReactNative
