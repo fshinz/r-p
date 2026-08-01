@@ -13,7 +13,7 @@ export default function patchInviteEmbed() {
     const InviteEmbed = findByTypeName('InviteEmbed')
     
     if (!InviteEmbed) {
-        console.warn('[InviteEmbedPatch] Could not find InviteEmbed component')
+        console.warn('[InviteEmbedButton] Could not find InviteEmbed component')
         return () => {}
     }
 
