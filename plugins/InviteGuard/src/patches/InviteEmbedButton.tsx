@@ -1,245 +1,88 @@
-import { findByProps, findByTypeName } from "@vendetta/metro";
-import { instead } from "@vendetta/patcher";
-import { storage } from "@vendetta/plugin";
-import { showToast } from "@vendetta/ui/toasts";
-import { getAssetIDByName } from "@vendetta/ui/assets";
+// patches/InviteEmbedPatch.tsx
+import { findByTypeName, findByProps } from '@revenge-mod/metro'
+import { React } from '@revenge-mod/metro/common'
+import { instead, after } from '@vendetta/patcher'
+import { storage } from '@vendetta/plugin'
+import { getAssetIDByName } from '@vendetta/ui/assets'
+import { showToast } from '@vendetta/ui/toasts'
+import { findInReactTree } from '@vendetta/utils'
 
-// React and React Native via require — works reliably in Hermes
-const React = require("react");
-const { View, TouchableOpacity, Text } = require("react-native");
+export let updateInviteEmbed = () => {}
 
-// ─── Discord internals ───
-const GuildActions = findByProps("joinGuild", "acceptInvite");
-const Navigation = findByProps("push", "pushLazy", "openURL");
-const { getInvite } = findByProps("getInvite", "resolveInvite") ?? {};
-const { showConfirmationAlert } = findByProps("showConfirmationAlert", "showAlert") ?? {};
+export default function patchInviteEmbed() {
+    // Find the InviteEmbed component
+    const InviteEmbed = findByTypeName('InviteEmbed')
+    
+    if (!InviteEmbed) {
+        console.warn('[InviteEmbedPatch] Could not find InviteEmbed component')
+        return () => {}
+    }
 
-// ─── Action helpers ───
+    const IconButton = findByProps('Button')?.Button || findByTypeName('Button')
+    const ActionRow = findByTypeName('ActionRow') || findByProps('ActionRow')
 
-function joinGuild(inviteCode: string, lurker = false) {
-  if (!GuildActions?.joinGuild) {
-    return showToast("joinGuild not found", getAssetIDByName("Small"));
-  }
+    // Create the custom button
+    const CustomButtonIcon = getAssetIDByName('PlusIcon') || getAssetIDByName('ic_plus_24px')
 
-  GuildActions.joinGuild(inviteCode, { lurker })
-    .then(() => {
-      showToast(
-        lurker ? `Lurking in ${inviteCode}` : `Joined ${inviteCode}`,
-        getAssetIDByName("Check"),
-      );
-      setTimeout(() => {
-        const guildId = getInvite?.(inviteCode)?.guild?.id;
-        if (guildId) Navigation?.push?.({ screen: "Guild", params: { guildId } });
-      }, 300);
+    return instead('type', InviteEmbed, (args, OriginalRender) => {
+        const [, forceUpdate] = React.useReducer((x: number) => ~x, 0)
+        updateInviteEmbed = () => forceUpdate()
+
+        const res = OriginalRender(...args)
+        
+        if (!res?.props?.children) return res
+
+        // Find where buttons live - look for "Join Server" button or action container
+        const buttonContainer = findInReactTree(
+            res,
+            (x) => {
+                if (!x?.props?.children) return false
+                // Look for Join Server button or action row
+                const children = Array.isArray(x.props.children) ? x.props.children : [x.props.children]
+                return children.some((child: any) => 
+                    child?.props?.label === "Join Server" ||
+                    child?.props?.text === "Join Server" ||
+                    child?.props?.children?.includes?.("Join")
+                )
+            }
+        )
+
+        if (buttonContainer && storage.showCustomButton) {
+            // If we found the button container, add our button next to it
+            const children = Array.isArray(buttonContainer.props.children) 
+                ? buttonContainer.props.children 
+                : [buttonContainer.props.children]
+
+            // Check if button already exists
+            const alreadyExists = children.some((c: any) => c?.props?.label === "My Custom Button")
+            
+            if (!alreadyExists) {
+                // Create our custom button
+                const customButton = React.createElement(
+                    IconButton || ActionRow || 'Button',
+                    {
+                        label: storage.buttonLabel || "My Button",
+                        text: storage.buttonLabel || "My Button",
+                        icon: CustomButtonIcon,
+                        onPress: () => {
+                            // Custom action - change this to whatever you want!
+                            showToast("Custom button pressed!", getAssetIDByName("toast_copy_link"))
+                            // Example: open a URL, copy something, etc.
+                            // clipboard.setString("Custom action!")
+                        },
+                        style: { marginLeft: 8 }
+                    }
+                )
+
+                // Add the button
+                if (Array.isArray(buttonContainer.props.children)) {
+                    buttonContainer.props.children.push(customButton)
+                } else {
+                    buttonContainer.props.children = [buttonContainer.props.children, customButton]
+                }
+            }
+        }
+
+        return res
     })
-    .catch((e: any) => {
-      if (e?.message?.includes("CAPTCHA")) {
-        showToast("CAPTCHA required", getAssetIDByName("Small"));
-        GuildActions?.acceptInvite?.(inviteCode);
-      } else {
-        showToast(`Failed: ${e?.message ?? "unknown"}`, getAssetIDByName("Small"));
-      }
-    });
-}
-
-function blockInvite(inviteCode: string) {
-  if (!storage.blockedInvites) storage.blockedInvites = [];
-  if (!storage.blockedInvites.includes(inviteCode)) {
-    storage.blockedInvites = [...storage.blockedInvites, inviteCode];
-    showToast(`Blocked: ${inviteCode}`, getAssetIDByName("Small"));
-  }
-}
-
-function showInviteInfo(inviteCode: string) {
-  const invite = getInvite?.(inviteCode);
-  if (!invite) return showToast("Invite info not loaded", getAssetIDByName("Small"));
-
-  const guild = invite.guild;
-  const channel = invite.channel;
-  const inviter = invite.inviter;
-
-  const lines = [
-    `**${guild?.name ?? "Unknown Server"}**`,
-    guild?.memberCount ? `Members: ~${guild.memberCount.toLocaleString()}` : "",
-    channel ? `Channel: #${channel.name}` : "",
-    inviter ? `Inviter: ${inviter.username}` : "",
-    `Code: ${inviteCode}`,
-  ].filter(Boolean);
-
-  showConfirmationAlert?.({
-    title: "Invite Details",
-    content: lines.join("\n"),
-    confirmText: "Quick Join",
-    cancelText: "Lurk",
-    onConfirm: () => joinGuild(inviteCode, false),
-    onCancel: () => joinGuild(inviteCode, true),
-  });
-}
-
-// ─── The patch ───
-
-export default function patchInviteEmbed(): () => void {
-  // Try multiple patterns to find Discord's invite embed component
-  const InviteEmbed =
-    findByTypeName("InviteEmbed") ??
-    findByTypeName("GuildInviteEmbed") ??
-    findByTypeName("ChannelInviteEmbed") ??
-    findByProps("InviteEmbed", "renderInvite")?.InviteEmbed ??
-    findByProps("inviteEmbed")?.inviteEmbed;
-
-  if (!InviteEmbed?.type && !InviteEmbed?.render) {
-    console.warn("[InviteGuard] Could not find InviteEmbed component");
-    return () => {};
-  }
-
-  const target = InviteEmbed.type?.prototype ? InviteEmbed.type : InviteEmbed;
-  const method = target.render ? "render" : "type";
-
-  return instead(
-    method,
-    target,
-    (args: any[], OriginalRender: Function) => {
-      const props = args[0];
-      const res = OriginalRender(...args);
-
-      // Bail if no children to inject into
-      if (!res?.props?.children) return res;
-
-      const inviteCode = props?.invite?.code ?? props?.code;
-      if (!inviteCode) return res;
-
-      // Hidden if blocked
-      if (storage.blockedInvites?.includes(inviteCode)) return null;
-
-      const inviteData = getInvite?.(inviteCode);
-      const isAlreadyMember = inviteData?.guild?.joined ?? false;
-
-      // ── Build buttons ──
-      const buttons: React.ReactElement[] = [];
-
-      if (storage.showJoinButton && !isAlreadyMember) {
-        buttons.push(
-          React.createElement(TouchableOpacity, {
-            key: "join",
-            onPress: () => joinGuild(inviteCode, false),
-            style: {
-              backgroundColor: "#3BA55D",
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-              borderRadius: 4,
-              flex: 1,
-              alignItems: "center",
-            },
-            activeOpacity: 0.7,
-          }, React.createElement(Text, {
-            style: { color: "#FFF", fontSize: 13, fontWeight: "600" },
-          }, "Join")),
-        );
-      }
-
-      if (storage.showLurkButton && !isAlreadyMember) {
-        buttons.push(
-          React.createElement(TouchableOpacity, {
-            key: "lurk",
-            onPress: () => joinGuild(inviteCode, true),
-            style: {
-              backgroundColor: "#4E5058",
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-              borderRadius: 4,
-              flex: 1,
-              alignItems: "center",
-            },
-            activeOpacity: 0.7,
-          }, React.createElement(Text, {
-            style: { color: "#FFF", fontSize: 13, fontWeight: "600" },
-          }, "Lurk")),
-        );
-      }
-
-      if (isAlreadyMember) {
-        buttons.push(
-          React.createElement(TouchableOpacity, {
-            key: "goto",
-            onPress: () => {
-              const guildId = inviteData?.guild?.id;
-              if (guildId) Navigation?.push?.({ screen: "Guild", params: { guildId } });
-            },
-            style: {
-              backgroundColor: "#5865F2",
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-              borderRadius: 4,
-              flex: 1,
-              alignItems: "center",
-            },
-            activeOpacity: 0.7,
-          }, React.createElement(Text, {
-            style: { color: "#FFF", fontSize: 13, fontWeight: "600" },
-          }, "Go to Server")),
-        );
-      }
-
-      if (storage.showInfoButton) {
-        buttons.push(
-          React.createElement(TouchableOpacity, {
-            key: "info",
-            onPress: () => showInviteInfo(inviteCode),
-            style: {
-              backgroundColor: "#4E5058",
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-              borderRadius: 4,
-              flex: 1,
-              alignItems: "center",
-            },
-            activeOpacity: 0.7,
-          }, React.createElement(Text, {
-            style: { color: "#FFF", fontSize: 13, fontWeight: "600" },
-          }, "Info")),
-        );
-      }
-
-      if (storage.showBlockButton) {
-        buttons.push(
-          React.createElement(TouchableOpacity, {
-            key: "block",
-            onPress: () => blockInvite(inviteCode),
-            style: {
-              backgroundColor: "#ED4245",
-              paddingHorizontal: 10,
-              paddingVertical: 6,
-              borderRadius: 4,
-              flex: 0,
-              alignItems: "center",
-            },
-            activeOpacity: 0.7,
-          }, React.createElement(Text, {
-            style: { color: "#FFF", fontSize: 13, fontWeight: "600" },
-          }, "✕")),
-        );
-      }
-
-      // Inject children: original embed + button row
-      const existingChildren = Array.isArray(res.props.children)
-        ? res.props.children
-        : [res.props.children];
-
-      return React.createElement(
-        React.Fragment,
-        null,
-        ...existingChildren,
-        buttons.length > 0 &&
-          React.createElement(View, {
-            style: {
-              flexDirection: "row",
-              justifyContent: "space-evenly",
-              paddingVertical: 6,
-              paddingHorizontal: 8,
-              gap: 6,
-            },
-          }, ...buttons),
-      );
-    },
-  );
 }
