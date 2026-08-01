@@ -1,1 +1,1 @@
-{"name":"GuildLurk","description":"Join guilds without appearing in member list","authors":[{"name":"fshin","id":"1381008677301129257"}],"main":"index.js","vendetta":{"icon":"ic_eye_hidden"},"hash":"51eeb16604c4847ab96d2a6289ff22af831c4b4e0e72dce469f3011239af9c94"}
+{"name":"ServerPreview","description":"Join guilds without appearing in member list","authors":[{"name":"fshin","id":"1381008677301129257"}],"main":"index.js","vendetta":{"icon":"ic_eye_hidden"},"hash":"ba02a3d5733cc9dc48c857176f2c6a34448166e0377ef56827351539e5b672c4"}
