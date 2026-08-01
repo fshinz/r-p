@@ -1,4 +1,4 @@
-import { components, React, ReactNative } from '@revenge-mod/metro/common'
+import { components, React, ReactNative } from '@vendetta/metro/common'
 import { storage } from '@vendetta/plugin'
 import { useProxy } from '@vendetta/storage'
 import { getAssetIDByName } from '@vendetta/ui/assets'
