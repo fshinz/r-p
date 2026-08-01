@@ -34,11 +34,11 @@ export default {
 
             if (!event || event.type !== "MESSAGE_DELETE" || !event?.id || !event?.channelId) return;
 
-            // 1. Get the existing cached message record directly from MessageStore
+            // Fetch cached message from store
             const message = MessageStore.getMessage(event.channelId, event.id);
-            if (!message) return; // If message isn't cached in memory, let default delete handle it
+            if (!message) return;
 
-            // Filter checks
+            // Filters
             if (storage.ignore.users.includes(message?.author?.id)) return;
             if (storage.ignore.bots && message?.author?.bot) return;
 
@@ -48,36 +48,43 @@ export default {
             }
             deleteable.push(event.id);
 
-            // 2. Format the timestamp notice
+            // Construct deleted timestamp tag
             let deletedNotice = " `[deleted]`";
             if (storage.timestamps) {
               deletedNotice = ` \`[deleted at ${moment().format(storage.ew ? "hh:mm:ss.SS a" : "HH:mm:ss.SS")}]\``;
             }
 
-            // 3. Mutate content in-place without touching author or embed structures
-            if (typeof message.content === "string" && !message.content.includes("`[deleted")) {
-              message.content = message.content + deletedNotice;
+            // Safely retrieve original content across different Discord RN record formats
+            const originalText = message.content ?? message.rawContent ?? "";
+
+            // Avoid double appending
+            if (!originalText.includes("`[deleted")) {
+              const newContent = (originalText ? originalText : "") + deletedNotice;
+              
+              // Apply content directly to record properties
+              try {
+                message.content = newContent;
+              } catch (_) {
+                // In case content is a read-only getter on frozen object
+                Object.defineProperty(message, "content", {
+                  value: newContent,
+                  writable: true,
+                  configurable: true,
+                  enumerable: true
+                });
+              }
             }
+
+            // Mark record as deleted for custom styling if supported
             message.deleted = true;
 
-            // 4. Safely trigger a UI refresh in the next microtask (prevents Flux dispatch collisions)
-            setTimeout(() => {
-              try {
-                FluxDispatcher.dispatch({
-                  type: "MESSAGE_UPDATE",
-                  message: {
-                    id: message.id,
-                    channel_id: message.channelId || event.channelId,
-                    content: message.content,
-                  },
-                });
-              } catch (err) {
-                console.error("[NoDelete+ -> UI refresh failed]", err);
-              }
-            }, 0);
+            // Cancel the delete action for ALL listeners in Flux by changing action type
+            args[0] = {
+              type: "NO_OP_PREVENT_DELETE",
+              id: event.id,
+              channelId: event.channelId
+            };
 
-            // 5. Change event type to prevent MessageStore from purging the message from memory
-            event.type = "NODELETE_PREVENT_PURGE";
             return args;
           } catch (e) {
             console.error("[NoDelete+ -> Dispatcher error]", e);
@@ -85,7 +92,7 @@ export default {
         })
       );
 
-      // Context menu patch for ignoring/unignoring users
+      // Context menu patch for user ignore list
       const contextMenuUnpatch = patchBefore("render", findByProps("ScrollView").View, (args: any[]) => {
         try {
           const treeMatch = findInReactTree(args, (r) => r?.key === ".$UserProfileOverflow");
