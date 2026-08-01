@@ -16,6 +16,5 @@ export default {
         }
         patches = []
     },
-    settings: Settings,
-},
+    settings: Settings
 }
