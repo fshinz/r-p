@@ -1,5 +1,5 @@
-import { findByTypeName, findByProps } from '@revenge-mod/metro'
-import { React } from '@revenge-mod/metro/common'
+import { findByTypeName, findByProps } from '@vendetta/metro'
+import { React } from '@vendetta/metro/common'
 import { instead } from '@vendetta/patcher'
 import { storage } from '@vendetta/plugin'
 import { getAssetIDByName } from '@vendetta/ui/assets'
