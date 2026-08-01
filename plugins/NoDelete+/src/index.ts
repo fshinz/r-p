@@ -117,28 +117,16 @@ export default {
   },
   onLoad() {
     try {
-      // Intercept Flux dispatches to handle message deletions and update preservation
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args: any[]) => {
           try {
             if (!MessageStore) MessageStore = findByStoreName("MessageStore");
             const event = args[0];
 
-            if (!event) return;
-
-            // Preserve embeds if a MESSAGE_UPDATE arrives stripping embed contents
-            if (event.type === "MESSAGE_UPDATE" && event.message?.id) {
-              const oldMsg = MessageStore.getMessage(event.message.channelId, event.message.id);
-              if (oldMsg?.embeds?.length && (!event.message.embeds || event.message.embeds.length === 0)) {
-                event.message.embeds = oldMsg.embeds.map(toRawEmbed);
-              }
-              return args;
-            }
-
-            // Handle MESSAGE_DELETE
-            if (event.type !== "MESSAGE_DELETE" || !event?.id || !event?.channelId) return;
+            if (!event || event.type !== "MESSAGE_DELETE" || !event?.id || !event?.channelId) return;
 
             const message = MessageStore.getMessage(event.channelId, event.id);
+            if (!message) return; // Not cached in memory, allow delete event
 
             if (storage.ignore.users.includes(message?.author?.id)) return;
             if (storage.ignore.bots && message?.author?.bot) return;
@@ -149,31 +137,31 @@ export default {
             }
             deleteable.push(event.id);
 
-            let automodMessage = "This message was deleted";
+            // Construct timestamp text indicator
+            let deletedNotice = " `[deleted]`";
             if (storage.timestamps) {
-              automodMessage += ` (${moment().format(storage.ew ? "hh:mm:ss.SS a" : "HH:mm:ss.SS")})`;
+              deletedNotice = ` \`[deleted at ${moment().format(storage.ew ? "hh:mm:ss.SS a" : "HH:mm:ss.SS")}]\``;
             }
 
-            // Convert embeds on the cached message object to raw format before dispatching error state
-            if (message?.embeds?.length) {
-              message.embeds = message.embeds.map(toRawEmbed);
-            }
+            // Convert embeds back to raw format so Discord renders them properly
+            const rawEmbeds = message.embeds?.length ? message.embeds.map(toRawEmbed) : [];
 
-            // Override event to keep message cache alive
-            args[0] = {
-              type: "MESSAGE_EDIT_FAILED_AUTOMOD",
-              messageData: {
-                type: 1,
-                message: {
-                  channelId: event.channelId,
-                  messageId: event.id,
-                },
+            // Dispatch an in-place update to mark the message as deleted without removing its data
+            FluxDispatcher.dispatch({
+              type: "MESSAGE_UPDATE",
+              message: {
+                id: event.id,
+                channel_id: event.channelId,
+                content: (message.content || "") + deletedNotice,
+                embeds: rawEmbeds,
+                attachments: message.attachments || [],
+                components: message.components || [],
+                edited_timestamp: message.editedTimestamp || new Date().toISOString(),
               },
-              errorResponseBody: {
-                code: 200000,
-                message: automodMessage,
-              },
-            };
+            });
+
+            // Neutralize the delete event so MessageStore doesn't purge it from UI
+            args[0] = { type: "NODELETE_PREVENT_DELETE" };
             return args;
           } catch (e) {
             console.error("[NoDelete+ -> Dispatcher error]", e);
@@ -181,7 +169,7 @@ export default {
         })
       );
 
-      // Add Ignore/Unignore options in profile overflow menu
+      // Context menu patch for user ignore list
       const contextMenuUnpatch = patchBefore("render", findByProps("ScrollView").View, (args: any[]) => {
         try {
           const treeMatch = findInReactTree(args, (r) => r?.key === ".$UserProfileOverflow");
