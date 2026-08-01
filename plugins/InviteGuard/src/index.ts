@@ -1,5 +1,5 @@
 import { storage } from '@vendetta/plugin'
-import patchInviteEmbed from './patches/InviteEmbedButton'  // ← Updated import
+import patchInviteEmbed from './patches/InviteEmbedButton'
 import Settings from './Settings'
 
 let patches: (() => void)[] = []
@@ -17,4 +17,5 @@ export default {
         patches = []
     },
     settings: Settings,
+},
 }
