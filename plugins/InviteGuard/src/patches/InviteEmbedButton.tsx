@@ -1,7 +1,6 @@
-// patches/InviteEmbedPatch.tsx
 import { findByTypeName, findByProps } from '@revenge-mod/metro'
 import { React } from '@revenge-mod/metro/common'
-import { instead, after } from '@vendetta/patcher'
+import { instead } from '@vendetta/patcher'
 import { storage } from '@vendetta/plugin'
 import { getAssetIDByName } from '@vendetta/ui/assets'
 import { showToast } from '@vendetta/ui/toasts'
@@ -18,10 +17,11 @@ export default function patchInviteEmbed() {
         return () => {}
     }
 
-    const IconButton = findByProps('Button')?.Button || findByTypeName('Button')
+    // Try to find button components
+    const ButtonComponent = findByProps('Button')?.Button || findByTypeName('Button')
     const ActionRow = findByTypeName('ActionRow') || findByProps('ActionRow')
 
-    // Create the custom button
+    // Icon for the button
     const CustomButtonIcon = getAssetIDByName('PlusIcon') || getAssetIDByName('ic_plus_24px')
 
     return instead('type', InviteEmbed, (args, OriginalRender) => {
@@ -32,12 +32,11 @@ export default function patchInviteEmbed() {
         
         if (!res?.props?.children) return res
 
-        // Find where buttons live - look for "Join Server" button or action container
+        // Find where the "Join Server" button lives
         const buttonContainer = findInReactTree(
             res,
             (x) => {
                 if (!x?.props?.children) return false
-                // Look for Join Server button or action row
                 const children = Array.isArray(x.props.children) ? x.props.children : [x.props.children]
                 return children.some((child: any) => 
                     child?.props?.label === "Join Server" ||
@@ -47,8 +46,7 @@ export default function patchInviteEmbed() {
             }
         )
 
-        if (buttonContainer && storage.showCustomButton) {
-            // If we found the button container, add our button next to it
+        if (buttonContainer && storage.showCustomButton !== false) {
             const children = Array.isArray(buttonContainer.props.children) 
                 ? buttonContainer.props.children 
                 : [buttonContainer.props.children]
@@ -57,24 +55,19 @@ export default function patchInviteEmbed() {
             const alreadyExists = children.some((c: any) => c?.props?.label === "My Custom Button")
             
             if (!alreadyExists) {
-                // Create our custom button
                 const customButton = React.createElement(
-                    IconButton || ActionRow || 'Button',
+                    ButtonComponent || ActionRow || 'Button',
                     {
-                        label: storage.buttonLabel || "My Button",
-                        text: storage.buttonLabel || "My Button",
+                        label: "My Button",
+                        text: "My Button",
                         icon: CustomButtonIcon,
                         onPress: () => {
-                            // Custom action - change this to whatever you want!
                             showToast("Custom button pressed!", getAssetIDByName("toast_copy_link"))
-                            // Example: open a URL, copy something, etc.
-                            // clipboard.setString("Custom action!")
                         },
                         style: { marginLeft: 8 }
                     }
                 )
 
-                // Add the button
                 if (Array.isArray(buttonContainer.props.children)) {
                     buttonContainer.props.children.push(customButton)
                 } else {
