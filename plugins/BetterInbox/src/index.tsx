@@ -1,7 +1,7 @@
-import { FluxDispatcher } = from "@vendetta/metro/common";
-import { findByStoreName } = from "@vendetta/metro";
-import { storage } = from "@vendetta/plugin";
-import { LocalStorage } = from "./types";
+import { FluxDispatcher } from "@vendetta/metro/common";
+import { findByStoreName } from "@vendetta/metro";
+import { storage } from "@vendetta/plugin";
+import { LocalStorage } from "./types";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 
 // Retrieve Discord Stores safely
