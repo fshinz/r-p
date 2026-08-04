@@ -117,50 +117,59 @@ function processNotification(type: string, payload: any): void {
     }
 
     // -------------------------------------------------------------
-    // 2. REACTION ADD
+    // 2. REACTION ADD (Your messages only + Full Avatar support)
     // -------------------------------------------------------------
     if (type === "MESSAGE_REACTION_ADD") {
       const targetMessageId = payload.message_id || payload.messageId;
+      const reactorId = payload.user_id || payload.userId;
+
+      // 1. Ignore if YOU reacted to a message
+      if (reactorId === currentUser.id) return;
+
+      // 2. Fetch target message from MessageStore
       const targetMessage = MessageStore?.getMessage(channelId, targetMessageId);
 
-      // ONLY log reactions if the reaction was added to YOUR message
+      // STRICT FILTER: If the message exists in cache and isn't yours, ignore!
       if (targetMessage && targetMessage.author?.id !== currentUser.id) {
-        return; // Ignore reactions on other people's messages
+        return;
       }
 
-      // Extract reacting user (Check payload member first, then store)
+      // 3. Extract the reactor's full User Object (payload -> UserStore fallback)
       const reactorUser =
         payload.member?.user ||
         payload.user ||
-        UserStore?.getUser(payload.user_id);
+        UserStore?.getUser(reactorId);
+
+      const finalAuthor = reactorUser || {
+        id: reactorId,
+        username: payload.member?.nick || "Someone",
+        globalName: payload.member?.nick || "Someone",
+        avatar: null,
+      };
 
       const reactorName =
-        reactorUser?.globalName ||
-        reactorUser?.username ||
-        payload.member?.nick ||
+        finalAuthor.globalName ||
+        finalAuthor.username ||
         "Someone";
 
-      const emojiName = payload.emoji?.name || "an emoji";
+      const emoji = payload.emoji;
+      const emojiName = emoji?.name || "an emoji";
 
-      console.log("[BetterInbox] Caught Reaction from", reactorName);
+      console.log("[BetterInbox] Caught Reaction on your message from", reactorName);
 
       pluginStorage.notifications = [
         {
-          id: `${targetMessageId}-${payload.user_id}-${Date.now()}`,
+          id: `${targetMessageId}-${reactorId}-${Date.now()}`,
           category: "reactions",
-          title: `${reactorName} reacted with ${emojiName}`,
-          content: targetMessage?.content ? `"${targetMessage.content}"` : `Reacted in ${channelName}`,
+          title: `${reactorName} reacted ${emojiName}`,
+          content: targetMessage?.content ? `"${targetMessage.content}"` : `Reacted to your message in ${channelName}`,
           guildName,
           channelName,
           guildId: guild?.id,
           channelId,
           messageId: targetMessageId,
           timestamp,
-          author: reactorUser || {
-            id: payload.user_id,
-            username: reactorName,
-            avatar: null,
-          },
+          author: finalAuthor,
         },
         ...pluginStorage.notifications,
       ];
@@ -181,11 +190,11 @@ export default {
       pluginStorage.notifications = [];
     }
 
-    // Subscribe to Discord events
+    // Subscribe to Flux events
     FluxDispatcher.subscribe("MESSAGE_CREATE", handleMessageCreate);
     FluxDispatcher.subscribe("MESSAGE_REACTION_ADD", handleReactionAdd);
 
-    // Patch YouBar bell icon to open NotificationCenterUI
+    // Patch YouBar bell icon
     try {
       unpatches.push(patchYouBar());
     } catch (err) {
