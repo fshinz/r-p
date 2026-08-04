@@ -1,38 +1,12 @@
-import { findByProps, findByStoreName } from "@vendetta/metro";
-import { storage } from "@vendetta/plugin";
+import { metro, storage } from "@vendetta";
+import { FluxDispatcher, UserStore, ChannelStore, GuildStore } from "@vendetta/metro/common";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 import {
   DiscordUser,
-  DiscordChannel,
-  DiscordGuild,
   IncomingMessagePayload,
   IncomingReactionPayload,
   LocalStorage,
 } from "./types";
-
-interface FluxDispatcher {
-  subscribe(event: string, callback: (payload: any) => void): void;
-  unsubscribe(event: string, callback: (payload: any) => void): void;
-}
-
-interface UserStoreModule {
-  getCurrentUser(): DiscordUser | null;
-  getUser(id: string): DiscordUser | undefined;
-}
-
-interface ChannelStoreModule {
-  getChannel(id: string): DiscordChannel | undefined;
-}
-
-interface GuildStoreModule {
-  getGuild(id: string): DiscordGuild | undefined;
-}
-
-// Safe module resolution using findByProps/findByStoreName
-const Dispatcher = findByProps("dispatch", "subscribe") as FluxDispatcher;
-const UserStore = findByStoreName("UserStore") as UserStoreModule;
-const ChannelStore = findByStoreName("ChannelStore") as ChannelStoreModule;
-const GuildStore = findByStoreName("GuildStore") as GuildStoreModule;
 
 const pluginStorage = storage as LocalStorage;
 
@@ -115,16 +89,16 @@ export const onLoad = (): void => {
     }
   };
 
-  if (Dispatcher?.subscribe) {
-    Dispatcher.subscribe("MESSAGE_CREATE", handleDispatch);
-    Dispatcher.subscribe("MESSAGE_REACTION_ADD", handleDispatch);
+  if (FluxDispatcher?.subscribe) {
+    FluxDispatcher.subscribe("MESSAGE_CREATE", handleDispatch);
+    FluxDispatcher.subscribe("MESSAGE_REACTION_ADD", handleDispatch);
   }
 };
 
 export const onUnload = (): void => {
-  if (Dispatcher?.unsubscribe && handleDispatch) {
-    Dispatcher.unsubscribe("MESSAGE_CREATE", handleDispatch);
-    Dispatcher.unsubscribe("MESSAGE_REACTION_ADD", handleDispatch);
+  if (FluxDispatcher?.unsubscribe && handleDispatch) {
+    FluxDispatcher.unsubscribe("MESSAGE_CREATE", handleDispatch);
+    FluxDispatcher.unsubscribe("MESSAGE_REACTION_ADD", handleDispatch);
   }
 };
 
