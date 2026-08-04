@@ -1,4 +1,3 @@
-import { patcher } from "@vendetta/patcher";
 import { getModule, findByStoreName } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
 import NotificationCenterUI from "./components/NotificationCenterUI";
@@ -8,11 +7,9 @@ import {
   DiscordGuild,
   IncomingMessagePayload,
   IncomingReactionPayload,
-  NotificationItem,
   LocalStorage,
 } from "./types";
 
-// Module Interfaces
 interface FluxDispatcher {
   subscribe(event: string, callback: (payload: any) => void): void;
   unsubscribe(event: string, callback: (payload: any) => void): void;
@@ -31,13 +28,11 @@ interface GuildStoreModule {
   getGuild(id: string): DiscordGuild | undefined;
 }
 
-// Metro Modules Retrieval
 const Dispatcher = getModule((m: any) => m.dispatch && m.subscribe) as FluxDispatcher;
 const UserStore = findByStoreName("UserStore") as UserStoreModule;
 const ChannelStore = findByStoreName("ChannelStore") as ChannelStoreModule;
 const GuildStore = findByStoreName("GuildStore") as GuildStoreModule;
 
-// Initialize Storage Type Safety
 const pluginStorage = storage as LocalStorage;
 pluginStorage.notifications = pluginStorage.notifications || [];
 
@@ -131,4 +126,3 @@ export const onUnload = (): void => {
 };
 
 export const settings = NotificationCenterUI;
-
