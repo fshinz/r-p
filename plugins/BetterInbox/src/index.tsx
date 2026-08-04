@@ -1,4 +1,4 @@
-import { getModule, findByStoreName } from "@vendetta/metro";
+import { findByProps, findByStoreName } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 import {
@@ -28,21 +28,22 @@ interface GuildStoreModule {
   getGuild(id: string): DiscordGuild | undefined;
 }
 
-const Dispatcher = getModule((m: any) => m.dispatch && m.subscribe) as FluxDispatcher;
+// Safe module resolution using findByProps/findByStoreName
+const Dispatcher = findByProps("dispatch", "subscribe") as FluxDispatcher;
 const UserStore = findByStoreName("UserStore") as UserStoreModule;
 const ChannelStore = findByStoreName("ChannelStore") as ChannelStoreModule;
 const GuildStore = findByStoreName("GuildStore") as GuildStoreModule;
 
 const pluginStorage = storage as LocalStorage;
-pluginStorage.notifications = pluginStorage.notifications || [];
 
 function processNotification(type: string, data: any): void {
+  if (!UserStore) return;
   const currentUser = UserStore.getCurrentUser();
   if (!currentUser) return;
 
   const channelId = data.channel_id || data.channelId;
-  const channel = ChannelStore.getChannel(channelId);
-  const guild = channel?.guild_id ? GuildStore.getGuild(channel.guild_id) : undefined;
+  const channel = ChannelStore?.getChannel(channelId);
+  const guild = channel?.guild_id ? GuildStore?.getGuild(channel.guild_id) : undefined;
 
   const baseNotification = {
     id: data.id || `${Date.now()}-${Math.random()}`,
@@ -54,7 +55,7 @@ function processNotification(type: string, data: any): void {
     messageId: data.id || data.message_id,
   };
 
-  // 1. REPLIES (Message Type 19)
+  // 1. REPLIES
   if (type === "MESSAGE_CREATE") {
     const msgData = data as IncomingMessagePayload;
     if (msgData.type === 19 && msgData.referenced_message) {
@@ -70,7 +71,7 @@ function processNotification(type: string, data: any): void {
       return;
     }
 
-    // 2. MENTIONS (People vs Bot)
+    // 2. MENTIONS
     if (msgData.mentions?.some((m) => m.id === currentUser.id)) {
       const isBot = msgData.author?.bot === true;
       pluginStorage.notifications.unshift({
@@ -103,26 +104,28 @@ function processNotification(type: string, data: any): void {
   }
 }
 
-let unpatchDispatcher: (() => void) | null = null;
+let handleDispatch: ((payload: any) => void) | null = null;
 
 export const onLoad = (): void => {
-  const handleDispatch = (payload: any) => {
-    if (["MESSAGE_CREATE", "MESSAGE_REACTION_ADD"].includes(payload.type)) {
+  pluginStorage.notifications = pluginStorage.notifications || [];
+
+  handleDispatch = (payload: any) => {
+    if (payload && ["MESSAGE_CREATE", "MESSAGE_REACTION_ADD"].includes(payload.type)) {
       processNotification(payload.type, payload);
     }
   };
 
-  Dispatcher.subscribe("MESSAGE_CREATE", handleDispatch);
-  Dispatcher.subscribe("MESSAGE_REACTION_ADD", handleDispatch);
-
-  unpatchDispatcher = () => {
-    Dispatcher.unsubscribe("MESSAGE_CREATE", handleDispatch);
-    Dispatcher.unsubscribe("MESSAGE_REACTION_ADD", handleDispatch);
-  };
+  if (Dispatcher?.subscribe) {
+    Dispatcher.subscribe("MESSAGE_CREATE", handleDispatch);
+    Dispatcher.subscribe("MESSAGE_REACTION_ADD", handleDispatch);
+  }
 };
 
 export const onUnload = (): void => {
-  if (unpatchDispatcher) unpatchDispatcher();
+  if (Dispatcher?.unsubscribe && handleDispatch) {
+    Dispatcher.unsubscribe("MESSAGE_CREATE", handleDispatch);
+    Dispatcher.unsubscribe("MESSAGE_REACTION_ADD", handleDispatch);
+  }
 };
 
 export const settings = NotificationCenterUI;
