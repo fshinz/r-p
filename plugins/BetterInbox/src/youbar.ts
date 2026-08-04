@@ -3,8 +3,8 @@ import { React } from "@vendetta/metro/common";
 import { instead } from "@vendetta/patcher";
 import NotificationCenterUI from "../components/NotificationCenterUI";
 
-const showCustomScreen = findByProps("showCustomScreen")?.showCustomScreen;
-const NavigationNative = findByProps("navigate", "push");
+// Grab Discord's root navigation reference (same module as the example plugin)
+const tabsNavigationRef = findByProps("getRootNavigationRef");
 
 export function patchYouBar() {
   const YouBarNotificationsButton = findByTypeName("YouBarNotificationsButton");
@@ -17,24 +17,26 @@ export function patchYouBar() {
   return instead("type", YouBarNotificationsButton, (args, OriginalRender) => {
     const res = OriginalRender(...args);
 
-    // Target the actual IconButton child rendered by YouBarNotificationsButton
+    // Target the inner button props where onPress is located
     const buttonProps = res?.props?.children?.props;
     if (!buttonProps) return res;
 
-    // Override the onPress handler on the inner button component
+    // Override the button's click event
     buttonProps.onPress = () => {
-      console.log("[BetterInbox] Redirecting YouBar bell to NotificationCenterUI");
+      console.log("[BetterInbox] Intercepted YouBar bell click!");
 
-      if (typeof showCustomScreen === "function") {
-        showCustomScreen(() => <NotificationCenterUI />, {
-          title: "Better Inbox",
-        });
-      } else if (NavigationNative?.push || NavigationNative?.navigate) {
-        const nav = NavigationNative.push || NavigationNative.navigate;
-        nav("VendettaCustomPage", {
-          title: "Better Inbox",
-          render: () => <NotificationCenterUI />,
-        });
+      try {
+        const navigation = tabsNavigationRef?.getRootNavigationRef?.();
+
+        if (navigation?.navigate) {
+          navigation.navigate("VendettaCustomPage", {
+            title: "Better Inbox",
+            render: () => React.createElement(NotificationCenterUI),
+          });
+          return;
+        }
+      } catch (err) {
+        console.error("[BetterInbox] Navigation error:", err);
       }
     };
 
