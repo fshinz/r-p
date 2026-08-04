@@ -1,87 +1,121 @@
-import { metro, storage } from "@vendetta";
+import { storage } from "@vendetta/plugin";
 import { FluxDispatcher, UserStore, ChannelStore, GuildStore } from "@vendetta/metro/common";
 import NotificationCenterUI from "./components/NotificationCenterUI";
-import {
-  DiscordUser,
-  IncomingMessagePayload,
-  IncomingReactionPayload,
-  LocalStorage,
-} from "./types";
+import { LocalStorage } from "./types";
 
 const pluginStorage = storage as LocalStorage;
 
 function processNotification(type: string, data: any): void {
-  if (!UserStore) return;
-  const currentUser = UserStore.getCurrentUser();
-  if (!currentUser) return;
+  try {
+    const currentUser = UserStore?.getCurrentUser();
+    if (!currentUser) {
+      console.log("[BetterInbox] Current user not loaded yet.");
+      return;
+    }
 
-  const channelId = data.channel_id || data.channelId;
-  const channel = ChannelStore?.getChannel(channelId);
-  const guild = channel?.guild_id ? GuildStore?.getGuild(channel.guild_id) : undefined;
+    // Ignore self messages
+    if (data.author?.id === currentUser.id || data.user_id === currentUser.id) {
+      return;
+    }
 
-  const baseNotification = {
-    id: data.id || `${Date.now()}-${Math.random()}`,
-    timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    guildName: guild ? guild.name : "Direct Message",
-    channelName: channel?.name ? `#${channel.name}` : "DM",
-    guildId: guild?.id,
-    channelId: channelId,
-    messageId: data.id || data.message_id,
-  };
+    const channelId = data.channel_id || data.channelId;
+    const channel = ChannelStore?.getChannel(channelId);
+    const guild = channel?.guild_id ? GuildStore?.getGuild(channel.guild_id) : undefined;
 
-  // 1. REPLIES
-  if (type === "MESSAGE_CREATE") {
-    const msgData = data as IncomingMessagePayload;
-    if (msgData.type === 19 && msgData.referenced_message) {
-      if (msgData.referenced_message.author?.id === currentUser.id) {
-        pluginStorage.notifications.unshift({
-          ...baseNotification,
-          category: "replies",
-          author: msgData.author,
-          content: msgData.content,
-          title: `${msgData.author.username} replied to you`,
-        });
+    const guildName = guild?.name || (channel?.isGroupDM() ? "Group DM" : "Direct Message");
+    const channelName = channel?.name ? `#${channel.name}` : "DM";
+
+    const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+    // Ensure array exists
+    if (!Array.isArray(pluginStorage.notifications)) {
+      pluginStorage.notifications = [];
+    }
+
+    // 1. MESSAGE CREATION (Mentions & Replies)
+    if (type === "MESSAGE_CREATE") {
+      const isReply = data.type === 19 && data.referenced_message?.author?.id === currentUser.id;
+      const isMention = data.mentions?.some((m: any) => m.id === currentUser.id) || data.mention_everyone;
+
+      if (isReply) {
+        console.log("[BetterInbox] Caught Reply from", data.author?.username);
+        pluginStorage.notifications = [
+          {
+            id: data.id || `${Date.now()}`,
+            category: "replies",
+            title: `${data.author?.username || "Someone"} replied to you`,
+            content: data.content || "",
+            guildName,
+            channelName,
+            guildId: guild?.id,
+            channelId,
+            messageId: data.id,
+            timestamp,
+            author: data.author,
+          },
+          ...pluginStorage.notifications,
+        ];
+        return;
       }
-      return;
+
+      if (isMention) {
+        console.log("[BetterInbox] Caught Mention from", data.author?.username);
+        const isBot = Boolean(data.author?.bot);
+        pluginStorage.notifications = [
+          {
+            id: data.id || `${Date.now()}`,
+            category: "mentions",
+            subCategory: isBot ? "bot" : "people",
+            title: `${data.author?.username || "Someone"} mentioned you`,
+            content: data.content || "",
+            guildName,
+            channelName,
+            guildId: guild?.id,
+            channelId,
+            messageId: data.id,
+            timestamp,
+            author: data.author,
+          },
+          ...pluginStorage.notifications,
+        ];
+        return;
+      }
     }
 
-    // 2. MENTIONS
-    if (msgData.mentions?.some((m) => m.id === currentUser.id)) {
-      const isBot = msgData.author?.bot === true;
-      pluginStorage.notifications.unshift({
-        ...baseNotification,
-        category: "mentions",
-        subCategory: isBot ? "bot" : "people",
-        author: msgData.author,
-        content: msgData.content,
-        title: `${msgData.author.username} mentioned you`,
-      });
-      return;
-    }
-  }
+    // 2. REACTION ADD
+    if (type === "MESSAGE_REACTION_ADD") {
+      console.log("[BetterInbox] Caught Reaction on message", data.message_id);
+      const user = UserStore?.getUser(data.user_id);
+      const username = user?.username || "Someone";
 
-  // 3. REACTIONS
-  if (type === "MESSAGE_REACTION_ADD") {
-    const rxnData = data as IncomingReactionPayload;
-    if (rxnData.user_id !== currentUser.id) {
-      const user = UserStore.getUser(rxnData.user_id);
-      pluginStorage.notifications.unshift({
-        ...baseNotification,
-        category: "reactions",
-        author: user || { id: rxnData.user_id, username: "Someone", avatar: null },
-        emoji: rxnData.emoji,
-        content: `Reacted with ${rxnData.emoji.name}`,
-        title: `${user ? user.username : "Someone"} reacted to your message`,
-      });
-      return;
+      pluginStorage.notifications = [
+        {
+          id: `${data.message_id}-${Date.now()}`,
+          category: "reactions",
+          title: `${username} reacted with ${data.emoji?.name || "an emoji"}`,
+          content: `Reacted in ${channelName}`,
+          guildName,
+          channelName,
+          guildId: guild?.id,
+          channelId,
+          messageId: data.message_id,
+          timestamp,
+          author: user || { id: data.user_id, username, avatar: null },
+        },
+        ...pluginStorage.notifications,
+      ];
     }
+  } catch (err) {
+    console.error("[BetterInbox] Error processing dispatcher event:", err);
   }
 }
 
 let handleDispatch: ((payload: any) => void) | null = null;
 
 export const onLoad = (): void => {
-  pluginStorage.notifications = pluginStorage.notifications || [];
+  if (!Array.isArray(pluginStorage.notifications)) {
+    pluginStorage.notifications = [];
+  }
 
   handleDispatch = (payload: any) => {
     if (payload && ["MESSAGE_CREATE", "MESSAGE_REACTION_ADD"].includes(payload.type)) {
