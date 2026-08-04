@@ -11,7 +11,6 @@ import {
 const { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet } = ReactNative;
 const { useState } = React;
 
-// Safe resolve for router jump
 const Router = findByProps("transitionToGuild", "transitionTo");
 
 export default function NotificationCenterUI(): JSX.Element {
@@ -28,6 +27,27 @@ export default function NotificationCenterUI(): JSX.Element {
 
   const pluginStorage = (storage as LocalStorage) || { notifications: [] };
   const notifications: NotificationItem[] = pluginStorage.notifications || [];
+
+  // STEP 2: TEST INJECTOR FUNCTION
+  const addTestNotification = () => {
+    const testItem: NotificationItem = {
+      id: `test-${Date.now()}`,
+      category: activeTab, // Adds to whatever tab you are currently viewing
+      subCategory: "people",
+      title: `Test ${activeTab.toUpperCase()} Notification`,
+      content: "This is a test notification to verify that the UI renders properly!",
+      guildName: "Test Server",
+      channelName: "#general",
+      guildId: "12345",
+      channelId: "67890",
+      messageId: "111213",
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      author: { id: "000", username: "TestUser", avatar: null },
+    };
+
+    // Re-assign array to trigger storage proxy update
+    pluginStorage.notifications = [testItem, ...(pluginStorage.notifications || [])];
+  };
 
   const filteredNotifications = notifications.filter((n) => {
     if (activeTab === "mentions") {
@@ -58,6 +78,13 @@ export default function NotificationCenterUI(): JSX.Element {
 
   return (
     <View style={styles.container}>
+      {/* Top Header Bar with Test Button */}
+      <View style={styles.headerBar}>
+        <TouchableOpacity style={styles.testBtn} onPress={addTestNotification}>
+          <Text style={styles.testBtnText}>+ Add Test Item</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Top Tab Bar */}
       <View style={styles.tabBar}>
         {tabs.map((tab) => (
@@ -132,6 +159,9 @@ export default function NotificationCenterUI(): JSX.Element {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#313338" },
+  headerBar: { padding: 8, backgroundColor: "#1e1f22", alignItems: "flex-end" },
+  testBtn: { backgroundColor: "#5865F2", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
+  testBtnText: { color: "#ffffff", fontWeight: "bold", fontSize: 12 },
   tabBar: { flexDirection: "row", backgroundColor: "#2b2d31", paddingVertical: 6 },
   tabButton: { flex: 1, paddingVertical: 10, alignItems: "center" },
   activeTabButton: { borderBottomWidth: 2, borderBottomColor: "#5865F2" },
