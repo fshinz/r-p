@@ -1,5 +1,4 @@
-import React, { useState } from "react";
-import { ReactNative, NavigationNative, useProxy } from "@vendetta/metro/common";
+import { React, ReactNative, NavigationNative, useProxy } from "@vendetta/metro/common";
 import { findByProps } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
 import {
@@ -10,17 +9,17 @@ import {
 } from "../types";
 
 const { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet } = ReactNative;
+const { useState } = React;
 
 // Safe resolve for router jump
 const Router = findByProps("transitionToGuild", "transitionTo");
 
 export default function NotificationCenterUI(): JSX.Element {
-  // Safe execution of useProxy to prevent "undefined is not a function"
   if (typeof useProxy === "function" && storage) {
     try {
       useProxy(storage);
     } catch (e) {
-      // Fallback if storage proxy subscription fails
+      // Ignored
     }
   }
 
