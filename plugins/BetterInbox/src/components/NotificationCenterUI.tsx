@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { getModule, findByProps } from "@vendetta/metro";
+import { ReactNative } from "@vendetta/metro/common"; // 👈 FIX: Import ReactNative directly from Vendetta
 import { useProxy } from "@vendetta/storage";
 import { storage } from "@vendetta/plugin";
 import {
@@ -9,10 +10,8 @@ import {
   LocalStorage,
 } from "../types";
 
-// Extract React Native UI components directly from Discord's Metro registry
-const { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet } = getModule(
-  (m: any) => m.View && m.Text && m.StyleSheet
-);
+// Extract directly from the ReactNative proxy
+const { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet } = ReactNative;
 
 interface NavigationNativeModule {
   navigate(screen: string, params?: object): void;
@@ -160,4 +159,3 @@ const styles = StyleSheet.create({
   location: { color: "#5865F2", fontSize: 12, marginVertical: 2, fontWeight: "500" },
   messageContent: { color: "#dbdee1", fontSize: 13 },
 });
-              
