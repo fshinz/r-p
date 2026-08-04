@@ -15,12 +15,19 @@ const { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet } = ReactNat
 const Router = findByProps("transitionToGuild", "transitionTo");
 
 export default function NotificationCenterUI(): JSX.Element {
-  const pluginStorage = storage as LocalStorage;
-  useProxy(storage);
+  // Safe execution of useProxy to prevent "undefined is not a function"
+  if (typeof useProxy === "function" && storage) {
+    try {
+      useProxy(storage);
+    } catch (e) {
+      // Fallback if storage proxy subscription fails
+    }
+  }
 
   const [activeTab, setActiveTab] = useState<NotificationCategory>("mentions");
   const [mentionFilter, setMentionFilter] = useState<"all" | MentionSubCategory>("all");
 
+  const pluginStorage = (storage as LocalStorage) || { notifications: [] };
   const notifications: NotificationItem[] = pluginStorage.notifications || [];
 
   const filteredNotifications = notifications.filter((n) => {
@@ -36,10 +43,14 @@ export default function NotificationCenterUI(): JSX.Element {
   const jumpToMessage = (guildId?: string, channelId?: string, messageId?: string): void => {
     if (!channelId || !messageId) return;
 
-    if (Router?.transitionToGuild) {
-      Router.transitionToGuild(guildId || "@me", channelId, messageId);
-    } else if (NavigationNative?.navigate) {
-      NavigationNative.navigate("Channel", { guildId, channelId, messageId });
+    try {
+      if (Router?.transitionToGuild) {
+        Router.transitionToGuild(guildId || "@me", channelId, messageId);
+      } else if (NavigationNative?.navigate) {
+        NavigationNative.navigate("Channel", { guildId, channelId, messageId });
+      }
+    } catch (err) {
+      console.error("[BetterInbox] Navigation error:", err);
     }
   };
 
