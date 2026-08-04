@@ -1,0 +1,15 @@
+{
+  "name": "BetterInbox",
+  "description": "Categorizes Discord notifications into clean tabs with filters for mentions, replies, and reactions.",
+  "authors": [
+    {
+      "name": "Developer",
+      "id": "100000000000000000"
+    }
+  ],
+  "main": "src/index.tsx",
+  "vendetta": {
+    "icon": "ic_notification_24px"
+  }
+}
+
