@@ -2,13 +2,17 @@ import React, { useState } from "react";
 import { getModule, findByProps } from "@vendetta/metro";
 import { useProxy } from "@vendetta/storage";
 import { storage } from "@vendetta/plugin";
-import { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet } from "react-native";
 import {
   NotificationCategory,
   MentionSubCategory,
   NotificationItem,
   LocalStorage,
 } from "../types";
+
+// Extract React Native UI components directly from Discord's Metro registry
+const { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet } = getModule(
+  (m: any) => m.View && m.Text && m.StyleSheet
+);
 
 interface NavigationNativeModule {
   navigate(screen: string, params?: object): void;
@@ -55,7 +59,7 @@ export default function NotificationCenterUI(): JSX.Element {
 
   return (
     <View style={styles.container}>
-      {/* Tab Navigation Header */}
+      {/* Top Tab Bar */}
       <View style={styles.tabBar}>
         {tabs.map((tab) => (
           <TouchableOpacity
@@ -70,7 +74,7 @@ export default function NotificationCenterUI(): JSX.Element {
         ))}
       </View>
 
-      {/* Sub-Filter for Mentions */}
+      {/* Sub-Filter Bar for Mentions */}
       {activeTab === "mentions" && (
         <View style={styles.subFilterBar}>
           {subFilters.map((sub) => (
@@ -85,7 +89,7 @@ export default function NotificationCenterUI(): JSX.Element {
         </View>
       )}
 
-      {/* Notification Stream */}
+      {/* Main Feed View */}
       <ScrollView style={styles.feed}>
         {filteredNotifications.length === 0 ? (
           <Text style={styles.emptyText}>No notifications found for this category.</Text>
@@ -156,3 +160,4 @@ const styles = StyleSheet.create({
   location: { color: "#5865F2", fontSize: 12, marginVertical: 2, fontWeight: "500" },
   messageContent: { color: "#dbdee1", fontSize: 13 },
 });
+              
