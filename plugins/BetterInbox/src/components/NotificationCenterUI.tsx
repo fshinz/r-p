@@ -1,7 +1,6 @@
 import React, { useState } from "react";
-import { getModule, findByProps } from "@vendetta/metro";
-import { ReactNative } from "@vendetta/metro/common"; // 👈 FIX: Import ReactNative directly from Vendetta
-import { useProxy } from "@vendetta/storage";
+import { ReactNative, NavigationNative, useProxy } from "@vendetta/metro/common";
+import { findByProps } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
 import {
   NotificationCategory,
@@ -10,19 +9,10 @@ import {
   LocalStorage,
 } from "../types";
 
-// Extract directly from the ReactNative proxy
 const { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet } = ReactNative;
 
-interface NavigationNativeModule {
-  navigate(screen: string, params?: object): void;
-}
-
-interface RouterModule {
-  transitionToGuild(guildId: string, channelId: string, messageId: string): void;
-}
-
-const NavigationNative = getModule((m: any) => m.navigate && m.push) as NavigationNativeModule;
-const Router = findByProps("transitionToGuild", "transitionTo") as RouterModule;
+// Safe resolve for router jump
+const Router = findByProps("transitionToGuild", "transitionTo");
 
 export default function NotificationCenterUI(): JSX.Element {
   const pluginStorage = storage as LocalStorage;
