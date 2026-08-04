@@ -1,7 +1,7 @@
 import { findByTypeName, findByProps } from "@vendetta/metro";
 import { React } from "@vendetta/metro/common";
 import { instead } from "@vendetta/patcher";
-import NotificationCenterUI from "../components/NotificationCenterUI";
+import NotificationCenterUI from "./components/NotificationCenterUI";
 
 // Grab Discord's root navigation reference (same module as the example plugin)
 const tabsNavigationRef = findByProps("getRootNavigationRef");
