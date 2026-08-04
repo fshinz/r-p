@@ -3,6 +3,7 @@ import { findByStoreName } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
 import type { LocalStorage, NotificationItem } from "./types";
 import NotificationCenterUI from "./components/NotificationCenterUI";
+import { patchYouBar } from "./youbar";
 
 // Retrieve Discord Stores safely
 const UserStore: any = findByStoreName("UserStore");
@@ -11,6 +12,9 @@ const GuildStore: any = findByStoreName("GuildStore");
 const MessageStore: any = findByStoreName("MessageStore");
 
 const pluginStorage = (storage as LocalStorage) || { notifications: [] };
+
+// Array to track active unpatch functions
+const unpatches: (() => void)[] = [];
 
 function processNotification(type: string, payload: any): void {
   try {
@@ -71,7 +75,7 @@ function processNotification(type: string, payload: any): void {
 
       // MENTIONS: Bulletproof check across all Discord mention formats
       const mentionsArray = Array.isArray(msg.mentions) ? msg.mentions : [];
-      
+
       const isExplicitlyMentioned =
         msg.mentioned === true ||
         payload.mentioned === true ||
@@ -177,13 +181,31 @@ export default {
       pluginStorage.notifications = [];
     }
 
+    // Subscribe to Discord events
     FluxDispatcher.subscribe("MESSAGE_CREATE", handleMessageCreate);
     FluxDispatcher.subscribe("MESSAGE_REACTION_ADD", handleReactionAdd);
+
+    // Patch YouBar bell icon to open NotificationCenterUI
+    try {
+      unpatches.push(patchYouBar());
+    } catch (err) {
+      console.error("[BetterInbox] Failed to patch YouBar:", err);
+    }
   },
+
   onUnload: () => {
     console.log("[BetterInbox] Unloaded");
+
+    // Unsubscribe from events
     FluxDispatcher.unsubscribe("MESSAGE_CREATE", handleMessageCreate);
     FluxDispatcher.unsubscribe("MESSAGE_REACTION_ADD", handleReactionAdd);
+
+    // Clean up patches
+    for (const unpatch of unpatches) {
+      unpatch?.();
+    }
+    unpatches.length = 0;
   },
+
   settings: NotificationCenterUI,
 };
