@@ -7,7 +7,7 @@
       "id": "123"
     }
   ],
-  "main": "src/index.ts",
+  "main": "src/index.tsx",
   "vendetta": {
     "icon": "ic_hide_24px"
   }
