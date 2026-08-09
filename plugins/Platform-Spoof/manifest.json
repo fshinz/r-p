@@ -1,0 +1,14 @@
+{
+  "name": "Spoofer",
+  "description": "plugin to change ur platform",
+  "authors": [
+    {
+      "name": "fshin",
+      "id": "123"
+    }
+  ],
+  "main": "src/index.ts",
+  "vendetta": {
+    "icon": "ic_hide_24px"
+  }
+}
