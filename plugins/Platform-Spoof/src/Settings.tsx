@@ -1,7 +1,6 @@
-import { React } from "@vendetta/metro/common";
+import { React, findByProps } from "@vendetta/metro/common";
 import { storage } from "@vendetta/plugin";
 import { useProxy } from "@vendetta/storage";
-import { findByProps } from "@vendetta/metro";
 import { General } from "@vendetta/ui/components";
 import { forceIdentify, Platform } from "./index";
 
