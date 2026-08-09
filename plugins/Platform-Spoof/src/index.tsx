@@ -20,18 +20,13 @@ export function getSpoofProps(): Record<string, string> | null {
     }
 }
 
-// Store unpatches safely
 let unpatches: Array<any> = [];
-
-export function getGatewaySocketModule() {
-    return findByProps("getSocket", "isConnected");
-}
 
 export function forceIdentify() {
     if (storage.platform === "off") return;
 
     try {
-        const gatewayModule = getGatewaySocketModule();
+        const gatewayModule = findByProps("getSocket", "isConnected");
         const socket = gatewayModule?.getSocket?.();
         if (!socket) return;
 
@@ -41,12 +36,12 @@ export function forceIdentify() {
         const ws = socket.webSocket;
         if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
             ws.close(1000);
-        } else {
-            socket.close?.();
+        } else if (typeof socket.close === "function") {
+            socket.close();
             setTimeout(() => socket.connect?.(), 500);
         }
     } catch (e) {
-        console.error("[PlatformSpoof] Error forcing identify:", e);
+        console.error("[PlatformSpoof] Error in forceIdentify:", e);
     }
 }
 
@@ -55,24 +50,25 @@ export default {
         unpatches = [];
 
         try {
-            const gatewayModule = getGatewaySocketModule();
+            const gatewayModule = findByProps("getSocket", "isConnected");
             const socket = gatewayModule?.getSocket?.();
 
             if (socket) {
                 const socketProto = Object.getPrototypeOf(socket);
                 const target = socketProto?.send ? socketProto : socket;
 
-                const unpatchSend = patcher.before(target, "send", (args) => {
-                    const [op, data] = args;
-                    if (op === IDENTIFY && data?.properties) {
-                        const spoof = getSpoofProps();
-                        if (spoof) {
-                            Object.assign(data.properties, spoof);
+                if (typeof target.send === "function") {
+                    const unpatchSend = patcher.before(target, "send", (args) => {
+                        const [op, data] = args;
+                        if (op === IDENTIFY && data?.properties) {
+                            const spoof = getSpoofProps();
+                            if (spoof) {
+                                Object.assign(data.properties, spoof);
+                            }
                         }
-                    }
-                });
-
-                if (unpatchSend) unpatches.push(unpatchSend);
+                    });
+                    if (unpatchSend) unpatches.push(unpatchSend);
+                }
             }
 
             const SuperProps = findByProps("getSuperProperties");
@@ -86,7 +82,6 @@ export default {
                     }
                     return ret;
                 });
-
                 if (unpatchSuperProps) unpatches.push(unpatchSuperProps);
             }
 
@@ -94,12 +89,11 @@ export default {
                 forceIdentify();
             }
         } catch (err) {
-            console.error("[PlatformSpoof] Error loading plugin:", err);
+            console.error("[PlatformSpoof] Error inside onLoad:", err);
         }
     },
 
     onUnload() {
-        // Safely unpatch whether the target is a function or an unpatch object
         for (const unpatch of unpatches) {
             try {
                 if (typeof unpatch === "function") {
@@ -108,7 +102,7 @@ export default {
                     unpatch.unpatch();
                 }
             } catch (e) {
-                console.error("[PlatformSpoof] Failed to unpatch cleanly:", e);
+                console.error("[PlatformSpoof] Unpatch failed:", e);
             }
         }
         unpatches = [];
