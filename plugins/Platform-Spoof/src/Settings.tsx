@@ -1,13 +1,8 @@
 import { React } from "@vendetta/metro/common";
+import { findByProps } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
 import { useProxy } from "@vendetta/storage";
-import { Forms, General } from "@vendetta/ui/components";
 import { forceIdentify, Platform } from "./index";
-
-const { ScrollView } = findByProps("ScrollView") ?? {};
-const FormSection = General?.FormSection ?? Forms?.FormSection;
-const FormRadioRow = General?.FormRadioRow ?? Forms?.FormRadioRow;
-const FormText = General?.FormText ?? Forms?.FormText;
 
 const PLATFORMS: Array<{ label: string; sublabel: string; value: Platform }> = [
     { label: "Off", sublabel: "Use native client properties", value: "off" },
@@ -20,6 +15,14 @@ const PLATFORMS: Array<{ label: string; sublabel: string; value: Platform }> = [
 
 export default function Settings() {
     useProxy(storage);
+
+    // Resolve UI components inside render function to prevent top-level initialization errors
+    const ScrollView = findByProps("ScrollView")?.ScrollView ?? findByProps("ScrollView");
+    const Forms = findByProps("FormSection", "FormRadioRow") ?? (window as any)?.vendetta?.ui?.components?.Forms;
+
+    const FormSection = Forms?.FormSection;
+    const FormRadioRow = Forms?.FormRadioRow;
+    const FormText = Forms?.FormText;
 
     if (!FormSection || !FormRadioRow) {
         return null;
@@ -41,9 +44,11 @@ export default function Settings() {
                         key={item.value}
                         label={item.label}
                         subLabel={item.sublabel}
-                        selected={storage.platform === item.value}
+                        selected={storage?.platform === item.value}
                         onPress={() => {
-                            storage.platform = item.value;
+                            if (storage) {
+                                storage.platform = item.value;
+                            }
                             forceIdentify();
                         }}
                     />
