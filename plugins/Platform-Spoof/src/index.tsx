@@ -7,7 +7,6 @@ const IDENTIFY = 2;
 
 export type Platform = "off" | "desktop" | "web" | "mobile" | "meta" | "console";
 
-// Default settings initialization
 storage.platform ??= "desktop";
 
 export function getSpoofProps(): Record<string, string> | null {
@@ -21,7 +20,8 @@ export function getSpoofProps(): Record<string, string> | null {
     }
 }
 
-let unpatches: Array<() => void> = [];
+// Store unpatches safely
+let unpatches: Array<any> = [];
 
 export function getGatewaySocketModule() {
     return findByProps("getSocket", "isConnected");
@@ -30,33 +30,39 @@ export function getGatewaySocketModule() {
 export function forceIdentify() {
     if (storage.platform === "off") return;
 
-    const gatewayModule = getGatewaySocketModule();
-    const socket = gatewayModule?.getSocket?.();
-    if (!socket) return;
+    try {
+        const gatewayModule = getGatewaySocketModule();
+        const socket = gatewayModule?.getSocket?.();
+        if (!socket) return;
 
-    socket.sessionId = null;
-    socket.seq = 0;
+        socket.sessionId = null;
+        socket.seq = 0;
 
-    const ws = socket.webSocket;
-    if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
-        ws.close(1000);
-    } else {
-        socket.close?.();
-        setTimeout(() => socket.connect?.(), 500);
+        const ws = socket.webSocket;
+        if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
+            ws.close(1000);
+        } else {
+            socket.close?.();
+            setTimeout(() => socket.connect?.(), 500);
+        }
+    } catch (e) {
+        console.error("[PlatformSpoof] Error forcing identify:", e);
     }
 }
 
 export default {
     onLoad() {
-        const gatewayModule = getGatewaySocketModule();
-        const socket = gatewayModule?.getSocket?.();
+        unpatches = [];
 
-        if (socket) {
-            const socketProto = Object.getPrototypeOf(socket);
-            const target = socketProto?.send ? socketProto : socket;
+        try {
+            const gatewayModule = getGatewaySocketModule();
+            const socket = gatewayModule?.getSocket?.();
 
-            unpatches.push(
-                patcher.before(target, "send", (args) => {
+            if (socket) {
+                const socketProto = Object.getPrototypeOf(socket);
+                const target = socketProto?.send ? socketProto : socket;
+
+                const unpatchSend = patcher.before(target, "send", (args) => {
                     const [op, data] = args;
                     if (op === IDENTIFY && data?.properties) {
                         const spoof = getSpoofProps();
@@ -64,14 +70,14 @@ export default {
                             Object.assign(data.properties, spoof);
                         }
                     }
-                })
-            );
-        }
+                });
 
-        const SuperProps = findByProps("getSuperProperties");
-        if (SuperProps?.getSuperProperties) {
-            unpatches.push(
-                patcher.after(SuperProps, "getSuperProperties", (_, ret) => {
+                if (unpatchSend) unpatches.push(unpatchSend);
+            }
+
+            const SuperProps = findByProps("getSuperProperties");
+            if (SuperProps?.getSuperProperties) {
+                const unpatchSuperProps = patcher.after(SuperProps, "getSuperProperties", (_, ret) => {
                     const spoof = getSpoofProps();
                     if (spoof && ret) {
                         ret.os = spoof.os;
@@ -79,18 +85,31 @@ export default {
                         ret.device = spoof.device;
                     }
                     return ret;
-                })
-            );
-        }
+                });
 
-        if (gatewayModule?.isConnected()) {
-            forceIdentify();
+                if (unpatchSuperProps) unpatches.push(unpatchSuperProps);
+            }
+
+            if (gatewayModule?.isConnected?.()) {
+                forceIdentify();
+            }
+        } catch (err) {
+            console.error("[PlatformSpoof] Error loading plugin:", err);
         }
     },
 
     onUnload() {
+        // Safely unpatch whether the target is a function or an unpatch object
         for (const unpatch of unpatches) {
-            unpatch();
+            try {
+                if (typeof unpatch === "function") {
+                    unpatch();
+                } else if (unpatch && typeof unpatch.unpatch === "function") {
+                    unpatch.unpatch();
+                }
+            } catch (e) {
+                console.error("[PlatformSpoof] Failed to unpatch cleanly:", e);
+            }
         }
         unpatches = [];
     },
