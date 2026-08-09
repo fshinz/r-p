@@ -1,66 +1,99 @@
 import { findByProps } from "@vendetta/metro";
-import { instead } from "@vendetta/patcher";
 import { storage } from "@vendetta/plugin";
+import { patcher } from "@vendetta";
 import Settings from "./Settings";
 
-// Find the Gateway socket module responsible for sending identify properties
-const GatewaySocket = findByProps("socket", "identify")?.socket;
+const IDENTIFY = 2;
 
-let unpatch: (() => void) | null = null;
+export type Platform = "off" | "desktop" | "web" | "mobile" | "meta" | "console";
+
+// Default settings initialization
+storage.platform ??= "desktop";
+
+export function getSpoofProps(): Record<string, string> | null {
+    switch (storage.platform as Platform) {
+        case "desktop": return { os: "Windows",     browser: "Discord Client",   device: "" };
+        case "web":     return { os: "Linux",       browser: "Chrome",           device: "" };
+        case "mobile":  return { os: "Android",     browser: "Discord Android",  device: "Discord Android" };
+        case "meta":    return { os: "Android",     browser: "Discord VR",       device: "Meta Quest" };
+        case "console": return { os: "Playstation", browser: "Discord Embedded", device: "PlayStation" };
+        default:        return null;
+    }
+}
+
+let unpatches: Array<() => void> = [];
+
+export function getGatewaySocketModule() {
+    return findByProps("getSocket", "isConnected");
+}
+
+export function forceIdentify() {
+    if (storage.platform === "off") return;
+
+    const gatewayModule = getGatewaySocketModule();
+    const socket = gatewayModule?.getSocket?.();
+    if (!socket) return;
+
+    socket.sessionId = null;
+    socket.seq = 0;
+
+    const ws = socket.webSocket;
+    if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
+        ws.close(1000);
+    } else {
+        socket.close?.();
+        setTimeout(() => socket.connect?.(), 500);
+    }
+}
 
 export default {
     onLoad() {
-        // Default settings state
-        if (storage.enabled === undefined) storage.enabled = false;
-        if (storage.platform === undefined) storage.platform = "desktop"; // "desktop" | "web" | "mobile"
+        const gatewayModule = getGatewaySocketModule();
+        const socket = gatewayModule?.getSocket?.();
 
-        if (!GatewaySocket) {
-            console.error("[PlatformSpoof] Gateway socket module not found!");
-            return;
+        if (socket) {
+            const socketProto = Object.getPrototypeOf(socket);
+            const target = socketProto?.send ? socketProto : socket;
+
+            unpatches.push(
+                patcher.before(target, "send", (args) => {
+                    const [op, data] = args;
+                    if (op === IDENTIFY && data?.properties) {
+                        const spoof = getSpoofProps();
+                        if (spoof) {
+                            Object.assign(data.properties, spoof);
+                        }
+                    }
+                })
+            );
         }
 
-        // Patch the socket's internal identify/properties function
-        unpatch = instead("identify", GatewaySocket, (args, orig) => {
-            if (storage.enabled && args[0]) {
-                const targetPlatform = storage.platform || "desktop";
+        const SuperProps = findByProps("getSuperProperties");
+        if (SuperProps?.getSuperProperties) {
+            unpatches.push(
+                patcher.after(SuperProps, "getSuperProperties", (_, ret) => {
+                    const spoof = getSpoofProps();
+                    if (spoof && ret) {
+                        ret.os = spoof.os;
+                        ret.browser = spoof.browser;
+                        ret.device = spoof.device;
+                    }
+                    return ret;
+                })
+            );
+        }
 
-                // Standard Discord gateway identify properties
-                if (targetPlatform === "desktop") {
-                    args[0].properties = {
-                        ...args[0].properties,
-                        os: "Windows",
-                        browser: "Discord Client",
-                        device: "",
-                        system_locale: "en-US",
-                        client_build_number: 999999,
-                    };
-                } else if (targetPlatform === "web") {
-                    args[0].properties = {
-                        ...args[0].properties,
-                        os: "Windows",
-                        browser: "Chrome",
-                        device: "",
-                        system_locale: "en-US",
-                    };
-                } else if (targetPlatform === "mobile") {
-                    args[0].properties = {
-                        ...args[0].properties,
-                        os: "Android",
-                        browser: "Discord Android",
-                        device: "Android Device",
-                    };
-                }
-            }
-
-            return orig.apply(GatewaySocket, args);
-        });
+        if (gatewayModule?.isConnected()) {
+            forceIdentify();
+        }
     },
 
     onUnload() {
-        unpatch?.();
-        unpatch = null;
+        for (const unpatch of unpatches) {
+            unpatch();
+        }
+        unpatches = [];
     },
 
     settings: Settings,
 };
-
