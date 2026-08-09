@@ -1,16 +1,20 @@
 import { findByProps } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
-import { patcher } from "@vendetta";
+import * as vendettaPatcher from "@vendetta/patcher";
 import Settings from "./Settings";
 
 const IDENTIFY = 2;
 
 export type Platform = "off" | "desktop" | "web" | "mobile" | "meta" | "console";
 
-storage.platform ??= "desktop";
+// Safely obtain patcher methods across Vendetta / Revenge / Bunny variations
+function getPatcher() {
+    return (vendettaPatcher as any)?.before ? vendettaPatcher : (window as any)?.vendetta?.patcher;
+}
 
 export function getSpoofProps(): Record<string, string> | null {
-    switch (storage.platform as Platform) {
+    const currentPlatform = storage?.platform ?? "desktop";
+    switch (currentPlatform as Platform) {
         case "desktop": return { os: "Windows",     browser: "Discord Client",   device: "" };
         case "web":     return { os: "Linux",       browser: "Chrome",           device: "" };
         case "mobile":  return { os: "Android",     browser: "Discord Android",  device: "Discord Android" };
@@ -23,7 +27,7 @@ export function getSpoofProps(): Record<string, string> | null {
 let unpatches: Array<any> = [];
 
 export function forceIdentify() {
-    if (storage.platform === "off") return;
+    if (storage?.platform === "off") return;
 
     try {
         const gatewayModule = findByProps("getSocket", "isConnected");
@@ -38,7 +42,9 @@ export function forceIdentify() {
             ws.close(1000);
         } else if (typeof socket.close === "function") {
             socket.close();
-            setTimeout(() => socket.connect?.(), 500);
+            setTimeout(() => {
+                try { socket.connect?.(); } catch (_) {}
+            }, 500);
         }
     } catch (e) {
         console.error("[PlatformSpoof] Error in forceIdentify:", e);
@@ -47,9 +53,18 @@ export function forceIdentify() {
 
 export default {
     onLoad() {
+        if (storage) {
+            storage.platform ??= "desktop";
+        }
         unpatches = [];
 
         try {
+            const patcher = getPatcher();
+            if (!patcher?.before) {
+                console.error("[PlatformSpoof] Patcher module not found.");
+                return;
+            }
+
             const gatewayModule = findByProps("getSocket", "isConnected");
             const socket = gatewayModule?.getSocket?.();
 
@@ -57,8 +72,8 @@ export default {
                 const socketProto = Object.getPrototypeOf(socket);
                 const target = socketProto?.send ? socketProto : socket;
 
-                if (typeof target.send === "function") {
-                    const unpatchSend = patcher.before(target, "send", (args) => {
+                if (typeof target?.send === "function") {
+                    const unpatchSend = patcher.before(target, "send", (args: any[]) => {
                         const [op, data] = args;
                         if (op === IDENTIFY && data?.properties) {
                             const spoof = getSpoofProps();
@@ -73,7 +88,7 @@ export default {
 
             const SuperProps = findByProps("getSuperProperties");
             if (SuperProps?.getSuperProperties) {
-                const unpatchSuperProps = patcher.after(SuperProps, "getSuperProperties", (_, ret) => {
+                const unpatchSuperProps = patcher.after(SuperProps, "getSuperProperties", (_: any, ret: any) => {
                     const spoof = getSpoofProps();
                     if (spoof && ret) {
                         ret.os = spoof.os;
