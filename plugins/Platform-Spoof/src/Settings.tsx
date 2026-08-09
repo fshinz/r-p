@@ -1,11 +1,13 @@
-import { React, findByProps } from "@vendetta/metro/common";
+import { React } from "@vendetta/metro/common";
 import { storage } from "@vendetta/plugin";
 import { useProxy } from "@vendetta/storage";
-import { General } from "@vendetta/ui/components";
+import { Forms, General } from "@vendetta/ui/components";
 import { forceIdentify, Platform } from "./index";
 
-const { ScrollView, View } = findByProps("ScrollView", "View");
-const { FormSection, FormRadioRow, FormText } = General;
+const { ScrollView } = findByProps("ScrollView") ?? {};
+const FormSection = General?.FormSection ?? Forms?.FormSection;
+const FormRadioRow = General?.FormRadioRow ?? Forms?.FormRadioRow;
+const FormText = General?.FormText ?? Forms?.FormText;
 
 const PLATFORMS: Array<{ label: string; sublabel: string; value: Platform }> = [
     { label: "Off", sublabel: "Use native client properties", value: "off" },
@@ -19,14 +21,20 @@ const PLATFORMS: Array<{ label: string; sublabel: string; value: Platform }> = [
 export default function Settings() {
     useProxy(storage);
 
+    if (!FormSection || !FormRadioRow) {
+        return null;
+    }
+
+    const Container = ScrollView ?? React.Fragment;
+
     return (
-        <ScrollView style={{ flex: 1, padding: 16 }}>
+        <Container style={{ flex: 1, padding: 16 }}>
             <FormSection title="PLATFORM SPOOFER">
-                <View style={{ marginBottom: 12 }}>
-                    <FormText color="text-muted" variant="text-sm/normal">
+                {FormText && (
+                    <FormText color="text-muted" style={{ marginBottom: 12 }}>
                         Select which platform status Discord's Gateway should broadcast to other users.
                     </FormText>
-                </View>
+                )}
 
                 {PLATFORMS.map((item) => (
                     <FormRadioRow
@@ -41,6 +49,6 @@ export default function Settings() {
                     />
                 ))}
             </FormSection>
-        </ScrollView>
+        </Container>
     );
 }
