@@ -1,260 +1,268 @@
-import { findByProps, findByDisplayName } from "@vendetta/metro";
-import { React, stylesheet } from "@vendetta/metro/common";
-import {
-  View,
-  Text,
-  FlatList,
-  TouchableOpacity,
-  Image,
-} from "react-native";
-import {
-  getNotifications,
-  clearAllNotifications,
-  subscribeToNotifications,
-} from "../notifications";
-import type { NotificationCategory, MentionSubCategory, NotificationItem } from "../types";
+import { FluxDispatcher } from "@vendetta/metro/common";
+import { findByStoreName } from "@vendetta/metro";
+import { storage } from "@vendetta/plugin";
+import type { LocalStorage, MentionSubCategory, NotificationItem } from "./types";
 
-const Router = findByProps("transitionToGuild");
-const NavigationNative = findByProps("navigate", "push");
-const AvatarUtils = findByProps("getUserAvatarURL");
+const UserStore: any = findByStoreName("UserStore");
+const ChannelStore: any = findByStoreName("ChannelStore");
+const GuildStore: any = findByStoreName("GuildStore");
+const MessageStore: any = findByStoreName("MessageStore");
+const GuildMemberStore: any = findByStoreName("GuildMemberStore");
+const RelationshipStore: any = findByStoreName("RelationshipStore");
 
-// Native Discord Controls
-const NativeTabs = findByDisplayName("Tabs") || findByProps("SegmentedControl")?.Tabs;
-const NativeSegmentedControl =
-  findByDisplayName("SegmentedControl") || findByProps("SegmentedControl")?.SegmentedControl;
+const ACTIVITY_TYPE_CUSTOM_STATUS = 4;
+const RELATIONSHIP_PENDING_INCOMING = 3;
 
-const styles = stylesheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#1e1f22",
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#f2f3f5",
-  },
-  clearText: {
-    color: "#f23f43",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  segmentWrapper: {
-    paddingHorizontal: 12,
-    paddingBottom: 8,
-  },
-  card: {
-    backgroundColor: "#2b2d31",
-    marginHorizontal: 12,
-    marginVertical: 4,
-    borderRadius: 8,
-    padding: 12,
-  },
-  cardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 6,
-  },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    marginRight: 10,
-    backgroundColor: "#35373c",
-  },
-  headerTextContainer: {
-    flex: 1,
-  },
-  itemTitle: {
-    color: "#f2f3f5",
-    fontSize: 14,
-    fontWeight: "bold",
-  },
-  location: {
-    color: "#949ba4",
-    fontSize: 12,
-  },
-  time: {
-    color: "#949ba4",
-    fontSize: 11,
-  },
-  content: {
-    color: "#dbdee1",
-    fontSize: 13,
-    marginTop: 2,
-  },
-  empty: {
-    padding: 32,
-    textAlign: "center",
-    color: "#949ba4",
-    fontSize: 14,
-  },
-});
+const pluginStorage = (storage as LocalStorage) || { notifications: [] };
+let memoryNotifications: NotificationItem[] = [];
 
-export default function NotificationCenterUI() {
-  const [, forceUpdate] = React.useReducer((x) => x + 1, 0);
-  const [activeCategory, setActiveCategory] = React.useState<NotificationCategory>("all");
-  const [mentionSubCategory, setMentionSubCategory] = React.useState<MentionSubCategory>("all");
+const listeners = new Set<() => void>();
+const lastActivitySignature = new Map<string, string>();
+let saveTimeout: any = null;
 
-  React.useEffect(() => {
-    return subscribeToNotifications(() => forceUpdate());
-  }, []);
+function syncStorageDebounced() {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    pluginStorage.notifications = memoryNotifications.slice(0, 100);
+  }, 2000);
+}
 
-  const jumpToMessage = (item: NotificationItem) => {
-    if (!item.channelId) return;
-    try {
-      if (Router?.transitionToGuild) {
-        Router.transitionToGuild(item.guildId || "@me", item.channelId, item.messageId);
-      } else if (NavigationNative?.navigate) {
-        NavigationNative.navigate("Channel", {
-          guildId: item.guildId || "@me",
-          channelId: item.channelId,
-          messageId: item.messageId,
-        });
-      }
-    } catch (err) {
-      console.error("[BetterInbox] Deep-link error:", err);
+function notifyListeners() {
+  listeners.forEach((cb) => cb());
+}
+
+export function pushNotification(item: NotificationItem) {
+  if (memoryNotifications.some((n) => n.id === item.id)) return;
+  memoryNotifications = [item, ...memoryNotifications];
+  syncStorageDebounced();
+  notifyListeners();
+}
+
+export function getNotifications(): NotificationItem[] {
+  return memoryNotifications;
+}
+
+export function clearAllNotifications() {
+  memoryNotifications = [];
+  pluginStorage.notifications = [];
+  notifyListeners();
+}
+
+export function subscribeToNotifications(callback: () => void): () => void {
+  listeners.add(callback);
+  return () => listeners.delete(callback);
+}
+
+// Handlers
+function handleIncomingMessage(payload: any) {
+  try {
+    const currentUser = UserStore?.getCurrentUser?.();
+    if (!currentUser) return;
+
+    const msg = payload?.message || payload;
+    if (!msg || !msg.channel_id) return;
+    if (msg.author?.id === currentUser.id) return;
+
+    const isDirectMention = msg.mentions?.some((u: any) => u.id === currentUser.id);
+    const isReplyToMe = msg.referenced_message?.author?.id === currentUser.id;
+
+    let isRoleMention = false;
+    const msgRoles = msg.mention_roles || msg.mentionRoles || [];
+    if (msgRoles.length > 0 && msg.guild_id) {
+      const myMember = GuildMemberStore?.getMember?.(msg.guild_id, currentUser.id);
+      const myRoles: string[] = myMember?.roles || [];
+      isRoleMention = msgRoles.some((roleId: string) => myRoles.includes(roleId));
     }
-  };
 
-  const allNotifications = getNotifications();
+    if (!isDirectMention && !isReplyToMe && !isRoleMention) return;
 
-  const filteredNotifications = allNotifications.filter((item) => {
-    if (activeCategory !== "all" && item.category !== activeCategory) return false;
-    if (activeCategory === "mentions" && mentionSubCategory !== "all") {
-      if (item.subCategory !== mentionSubCategory) return false;
+    const channel = ChannelStore?.getChannel?.(msg.channel_id);
+    const guild = channel?.guild_id ? GuildStore?.getGuild?.(channel.guild_id) : undefined;
+    const author = msg.author || UserStore?.getUser?.(msg.author?.id);
+
+    const isReply = isReplyToMe;
+    const category = isReply ? "replies" : "mentions";
+    let subCategory: MentionSubCategory = "people";
+
+    if (author?.bot) {
+      subCategory = "bot";
+    } else if (isRoleMention) {
+      subCategory = "role";
     }
-    return true;
-  });
 
-  const categoryTabs = [
-    { id: "all", label: "All" },
-    { id: "mentions", label: "Mentions" },
-    { id: "replies", label: "Replies" },
-    { id: "reactions", label: "Reactions" },
-    { id: "friend_request", label: "Requests" },
-    { id: "threads", label: "Threads" },
-    { id: "other", label: "Status" },
-  ];
+    pushNotification({
+      id: msg.id || `${Date.now()}`,
+      category,
+      subCategory,
+      title: isReply
+        ? `${author?.globalName || author?.username || "Someone"} replied to you`
+        : subCategory === "role"
+        ? `${author?.globalName || author?.username || "Someone"} mentioned your role`
+        : `${author?.globalName || author?.username || "Someone"} mentioned you`,
+      content: msg.content || "",
+      guildName: guild?.name || "Direct Message",
+      channelName: channel?.name ? `#${channel.name}` : "DM",
+      guildId: guild?.id,
+      channelId: msg.channel_id,
+      messageId: msg.id,
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      author,
+    });
+  } catch (err) {
+    console.error("[BetterInbox] Message Handler Error:", err);
+  }
+}
 
-  const subCategoryOptions = [
-    { id: "all", label: "ALL" },
-    { id: "people", label: "PEOPLE" },
-    { id: "role", label: "ROLE" },
-    { id: "bot", label: "BOT" },
-  ];
+function handleReactionAdd(payload: any) {
+  try {
+    const currentUser = UserStore?.getCurrentUser?.();
+    if (!currentUser) return;
 
-  return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Inbox</Text>
-        <TouchableOpacity onPress={clearAllNotifications}>
-          <Text style={styles.clearText}>Clear All</Text>
-        </TouchableOpacity>
-      </View>
+    const channelId = payload.channel_id || payload.channelId;
+    const targetMessageId = payload.message_id || payload.messageId;
+    const reactorId = payload.user_id || payload.userId;
+    if (reactorId === currentUser.id) return;
 
-      {/* Primary Category Selector */}
-      {NativeTabs ? (
-        <NativeTabs
-          activeTab={activeCategory}
-          onTabChange={(id: NotificationCategory) => setActiveCategory(id)}
-          tabs={categoryTabs}
-        />
-      ) : (
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={categoryTabs}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={{
-                paddingHorizontal: 12,
-                paddingVertical: 8,
-                backgroundColor: activeCategory === item.id ? "#5865f2" : "#2b2d31",
-                borderRadius: 16,
-                marginHorizontal: 4,
-                marginBottom: 8,
-              }}
-              onPress={() => setActiveCategory(item.id as NotificationCategory)}
-            >
-              <Text style={{ color: "#ffffff", fontWeight: "600", fontSize: 13 }}>{item.label}</Text>
-            </TouchableOpacity>
-          )}
-        />
-      )}
+    const targetMessage = MessageStore?.getMessage?.(channelId, targetMessageId);
+    if (targetMessage && targetMessage.author?.id !== currentUser.id) return;
 
-      {/* Sub-Filter for Mentions */}
-      {activeCategory === "mentions" && (
-        <View style={styles.segmentWrapper}>
-          {NativeSegmentedControl ? (
-            <NativeSegmentedControl
-              values={subCategoryOptions.map((o) => o.label)}
-              selectedIndex={subCategoryOptions.findIndex((o) => o.id === mentionSubCategory)}
-              onChange={(index: number) => setMentionSubCategory(subCategoryOptions[index].id as MentionSubCategory)}
-            />
-          ) : (
-            <View style={{ flexDirection: "row", justifyContent: "space-around" }}>
-              {subCategoryOptions.map((opt) => (
-                <TouchableOpacity
-                  key={opt.id}
-                  onPress={() => setMentionSubCategory(opt.id as MentionSubCategory)}
-                  style={{
-                    paddingVertical: 4,
-                    paddingHorizontal: 8,
-                    borderBottomWidth: mentionSubCategory === opt.id ? 2 : 0,
-                    borderBottomColor: "#5865f2",
-                  }}
-                >
-                  <Text style={{ color: mentionSubCategory === opt.id ? "#ffffff" : "#949ba4", fontSize: 12 }}>
-                    {opt.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-        </View>
-      )}
+    const channel = ChannelStore?.getChannel?.(channelId);
+    const guild = channel?.guild_id ? GuildStore?.getGuild?.(channel.guild_id) : undefined;
+    const reactorUser = payload.member?.user || payload.user || UserStore?.getUser?.(reactorId);
 
-      {/* Notification List */}
-      <FlatList
-        data={filteredNotifications}
-        keyExtractor={(item) => item.id}
-        ListEmptyComponent={<Text style={styles.empty}>No notifications found.</Text>}
-        renderItem={({ item }) => {
-          const avatarUrl = item.author?.id
-            ? AvatarUtils?.getUserAvatarURL?.(item.author)
-            : null;
+    pushNotification({
+      id: `react-${targetMessageId}-${reactorId}`,
+      category: "reactions",
+      title: `${reactorUser?.globalName || reactorUser?.username || "Someone"} reacted ${payload.emoji?.name || "an emoji"}`,
+      content: targetMessage?.content ? `"${targetMessage.content}"` : `Reacted in ${channel?.name ? `#${channel.name}` : "DM"}`,
+      guildName: guild?.name || "Direct Message",
+      channelName: channel?.name ? `#${channel.name}` : "DM",
+      guildId: guild?.id,
+      channelId,
+      messageId: targetMessageId,
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      author: reactorUser,
+    });
+  } catch (err) {
+    console.error("[BetterInbox] Reaction Handler Error:", err);
+  }
+}
 
-          return (
-            <TouchableOpacity style={styles.card} onPress={() => jumpToMessage(item)}>
-              <View style={styles.cardHeader}>
-                {avatarUrl ? (
-                  <Image source={{ uri: avatarUrl }} style={styles.avatar} />
-                ) : (
-                  <View style={styles.avatar} />
-                )}
-                <View style={styles.headerTextContainer}>
-                  <Text style={styles.itemTitle}>{item.title}</Text>
-                  {item.guildName ? (
-                    <Text style={styles.location}>
-                      {item.guildName} • {item.channelName}
-                    </Text>
-                  ) : null}
-                </View>
-                <Text style={styles.time}>{item.timestamp}</Text>
-              </View>
-              {item.content ? <Text style={styles.content}>{item.content}</Text> : null}
-            </TouchableOpacity>
-          );
-        }}
-      />
-    </View>
-  );
+function handleRelationshipAdd(payload: any) {
+  try {
+    const relationship = payload?.relationship;
+    if (!relationship || relationship.type !== RELATIONSHIP_PENDING_INCOMING) return;
+    const user = relationship.user;
+    if (!user) return;
+
+    pushNotification({
+      id: `friend-request-${relationship.id}`,
+      category: "friend_request",
+      title: `${user.globalName || user.username} sent you a friend request`,
+      content: "Pending incoming request",
+      guildName: "",
+      channelName: "",
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      author: user,
+    });
+  } catch (err) {
+    console.error("[BetterInbox] Relationship Handler Error:", err);
+  }
+}
+
+function handleThreadMembersUpdate(payload: any) {
+  try {
+    const currentUser = UserStore?.getCurrentUser?.();
+    if (!currentUser) return;
+
+    const addedMembers = payload?.addedMembers;
+    if (!Array.isArray(addedMembers)) return;
+
+    const isMeAdded = addedMembers.some((m: any) => m.userId === currentUser.id);
+    if (!isMeAdded) return;
+
+    const channel = ChannelStore?.getChannel?.(payload.id);
+    if (!channel) return;
+
+    const guild = channel.guild_id ? GuildStore?.getGuild?.(channel.guild_id) : undefined;
+
+    pushNotification({
+      id: `thread-${channel.id}-${Date.now()}`,
+      category: "threads",
+      title: `You were added to a thread`,
+      content: channel.name ? `#${channel.name}` : "Thread",
+      guildName: guild?.name || "Server",
+      channelName: channel.name ? `#${channel.name}` : "Thread",
+      guildId: guild?.id,
+      channelId: channel.id,
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    });
+  } catch (err) {
+    console.error("[BetterInbox] Thread Handler Error:", err);
+  }
+}
+
+function handlePresenceUpdates(payload: any) {
+  try {
+    const updates = payload?.updates;
+    if (!Array.isArray(updates)) return;
+
+    const currentUser = UserStore?.getCurrentUser?.();
+
+    // Safe retrieval of friend IDs array across mobile Discord client builds
+    const friendMap = RelationshipStore?.getRelationships?.() || {};
+    const friendIds: string[] = typeof RelationshipStore?.getFriendIDs === "function" 
+      ? RelationshipStore.getFriendIDs() 
+      : Object.keys(friendMap).filter((id) => friendMap[id] === 1);
+
+    for (const update of updates) {
+      const user = update?.user;
+      if (!user || user.id === currentUser?.id || user.bot || !friendIds.includes(user.id)) continue;
+
+      const customStatus = update.activities?.find((a: any) => a?.type === ACTIVITY_TYPE_CUSTOM_STATUS);
+      const statusText = customStatus?.state || "";
+      const emojiName = customStatus?.emoji?.name;
+
+      const signature = statusText || emojiName || "";
+      if (lastActivitySignature.get(user.id) === signature) continue;
+      lastActivitySignature.set(user.id, signature);
+
+      if (!signature) continue;
+
+      pushNotification({
+        id: `presence-${user.id}-${Date.now()}`,
+        category: "other",
+        title: `${user.globalName || user.username} updated their status`,
+        content: statusText || (emojiName ? `:${emojiName}:` : ""),
+        guildName: "",
+        channelName: "",
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        author: user,
+      });
+    }
+  } catch (err) {
+    console.error("[BetterInbox] Presence Handler Error:", err);
+  }
+}
+
+export function initNotificationEngine() {
+  if (!pluginStorage.notifications) pluginStorage.notifications = [];
+  memoryNotifications = [...pluginStorage.notifications];
+
+  FluxDispatcher.subscribe("MESSAGE_CREATE", handleIncomingMessage);
+  FluxDispatcher.subscribe("MESSAGE_REACTION_ADD", handleReactionAdd);
+  FluxDispatcher.subscribe("RELATIONSHIP_ADD", handleRelationshipAdd);
+  FluxDispatcher.subscribe("THREAD_MEMBERS_UPDATE", handleThreadMembersUpdate);
+  FluxDispatcher.subscribe("PRESENCE_UPDATES", handlePresenceUpdates);
+}
+
+export function stopNotificationEngine() {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  pluginStorage.notifications = memoryNotifications.slice(0, 100);
+
+  FluxDispatcher.unsubscribe("MESSAGE_CREATE", handleIncomingMessage);
+  FluxDispatcher.unsubscribe("MESSAGE_REACTION_ADD", handleReactionAdd);
+  FluxDispatcher.unsubscribe("RELATIONSHIP_ADD", handleRelationshipAdd);
+  FluxDispatcher.unsubscribe("THREAD_MEMBERS_UPDATE", handleThreadMembersUpdate);
+  FluxDispatcher.unsubscribe("PRESENCE_UPDATES", handlePresenceUpdates);
 }
