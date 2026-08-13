@@ -9,6 +9,7 @@ interface Embed {
         proxy_url: string
         width: number
         height: number
+        srcIsAnimated?: boolean
     }
 }
 
@@ -57,6 +58,10 @@ patches.push(
         data.message.content = cleanContent
 
         const embeds = (data.message.embeds as Embed[]) || []
+        
+        // Check if the URL is animated (gif/apng)
+        const isAnimated = stickerUrl.includes('.gif') || stickerUrl.includes('.apng')
+
         embeds.push({
             type: 'image',
             url: stickerUrl,
@@ -65,6 +70,7 @@ patches.push(
                 proxy_url: stickerUrl,
                 width: 160,
                 height: 160,
+                srcIsAnimated: isAnimated,
             },
         })
 
