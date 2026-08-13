@@ -56,7 +56,7 @@ export function subscribeToNotifications(callback: () => void): () => void {
 // Handlers
 function handleIncomingMessage(payload: any) {
   try {
-    const currentUser = UserStore?.getCurrentUser();
+    const currentUser = UserStore?.getCurrentUser?.();
     if (!currentUser) return;
 
     const msg = payload?.message || payload;
@@ -69,16 +69,16 @@ function handleIncomingMessage(payload: any) {
     let isRoleMention = false;
     const msgRoles = msg.mention_roles || msg.mentionRoles || [];
     if (msgRoles.length > 0 && msg.guild_id) {
-      const myMember = GuildMemberStore?.getMember(msg.guild_id, currentUser.id);
+      const myMember = GuildMemberStore?.getMember?.(msg.guild_id, currentUser.id);
       const myRoles: string[] = myMember?.roles || [];
       isRoleMention = msgRoles.some((roleId: string) => myRoles.includes(roleId));
     }
 
     if (!isDirectMention && !isReplyToMe && !isRoleMention) return;
 
-    const channel = ChannelStore?.getChannel(msg.channel_id);
-    const guild = channel?.guild_id ? GuildStore?.getGuild(channel.guild_id) : undefined;
-    const author = msg.author || UserStore?.getUser(msg.author?.id);
+    const channel = ChannelStore?.getChannel?.(msg.channel_id);
+    const guild = channel?.guild_id ? GuildStore?.getGuild?.(channel.guild_id) : undefined;
+    const author = msg.author || UserStore?.getUser?.(msg.author?.id);
 
     const isReply = isReplyToMe;
     const category = isReply ? "replies" : "mentions";
@@ -115,7 +115,7 @@ function handleIncomingMessage(payload: any) {
 
 function handleReactionAdd(payload: any) {
   try {
-    const currentUser = UserStore?.getCurrentUser();
+    const currentUser = UserStore?.getCurrentUser?.();
     if (!currentUser) return;
 
     const channelId = payload.channel_id || payload.channelId;
@@ -123,12 +123,12 @@ function handleReactionAdd(payload: any) {
     const reactorId = payload.user_id || payload.userId;
     if (reactorId === currentUser.id) return;
 
-    const targetMessage = MessageStore?.getMessage(channelId, targetMessageId);
+    const targetMessage = MessageStore?.getMessage?.(channelId, targetMessageId);
     if (targetMessage && targetMessage.author?.id !== currentUser.id) return;
 
-    const channel = ChannelStore?.getChannel(channelId);
-    const guild = channel?.guild_id ? GuildStore?.getGuild(channel.guild_id) : undefined;
-    const reactorUser = payload.member?.user || payload.user || UserStore?.getUser(reactorId);
+    const channel = ChannelStore?.getChannel?.(channelId);
+    const guild = channel?.guild_id ? GuildStore?.getGuild?.(channel.guild_id) : undefined;
+    const reactorUser = payload.member?.user || payload.user || UserStore?.getUser?.(reactorId);
 
     pushNotification({
       id: `react-${targetMessageId}-${reactorId}`,
@@ -172,7 +172,7 @@ function handleRelationshipAdd(payload: any) {
 
 function handleThreadMembersUpdate(payload: any) {
   try {
-    const currentUser = UserStore?.getCurrentUser();
+    const currentUser = UserStore?.getCurrentUser?.();
     if (!currentUser) return;
 
     const addedMembers = payload?.addedMembers;
@@ -181,10 +181,10 @@ function handleThreadMembersUpdate(payload: any) {
     const isMeAdded = addedMembers.some((m: any) => m.userId === currentUser.id);
     if (!isMeAdded) return;
 
-    const channel = ChannelStore?.getChannel(payload.id);
+    const channel = ChannelStore?.getChannel?.(payload.id);
     if (!channel) return;
 
-    const guild = channel.guild_id ? GuildStore?.getGuild(channel.guild_id) : undefined;
+    const guild = channel.guild_id ? GuildStore?.getGuild?.(channel.guild_id) : undefined;
 
     pushNotification({
       id: `thread-${channel.id}-${Date.now()}`,
@@ -207,8 +207,13 @@ function handlePresenceUpdates(payload: any) {
     const updates = payload?.updates;
     if (!Array.isArray(updates)) return;
 
-    const currentUser = UserStore?.getCurrentUser();
-    const friendIds: string[] = RelationshipStore?.getFriendIDs?.() ?? [];
+    const currentUser = UserStore?.getCurrentUser?.();
+
+    // Safe retrieval of friend IDs array across mobile Discord client builds
+    const friendMap = RelationshipStore?.getRelationships?.() || {};
+    const friendIds: string[] = typeof RelationshipStore?.getFriendIDs === "function" 
+      ? RelationshipStore.getFriendIDs() 
+      : Object.keys(friendMap).filter((id) => friendMap[id] === 1);
 
     for (const update of updates) {
       const user = update?.user;
