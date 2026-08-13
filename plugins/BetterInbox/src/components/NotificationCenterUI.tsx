@@ -27,7 +27,7 @@ const CATEGORIES: { id: NotificationCategory | "all"; label: string }[] = [
   { id: "other", label: "Other" },
 ];
 
-export function NotificationCenterUI() {
+export default function NotificationCenterUI() {
   const [items, setItems] = React.useState<NotificationItem[]>(getNotifications());
   const [activeTab, setActiveTab] = React.useState<NotificationCategory | "all">("all");
 
