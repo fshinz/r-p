@@ -1,160 +1,260 @@
-import { React, ReactNative, NavigationNative, useProxy } from "@vendetta/metro/common";
-import { findByProps } from "@vendetta/metro";
-import { storage } from "@vendetta/plugin";
+import { findByProps, findByDisplayName } from "@vendetta/metro";
+import { React, stylesheet } from "@vendetta/metro/common";
 import {
-  NotificationCategory,
-  MentionSubCategory,
-  NotificationItem,
-  LocalStorage,
-} from "../types";
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  Image,
+} from "react-native";
+import {
+  getNotifications,
+  clearAllNotifications,
+  subscribeToNotifications,
+} from "../notifications";
+import type { NotificationCategory, MentionSubCategory, NotificationItem } from "../types";
 
-const { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet } = ReactNative;
-const { useState } = React;
+const Router = findByProps("transitionToGuild");
+const NavigationNative = findByProps("navigate", "push");
+const AvatarUtils = findByProps("getUserAvatarURL");
 
-const Router = findByProps("transitionToGuild", "transitionTo");
+// Native Discord Controls
+const NativeTabs = findByDisplayName("Tabs") || findByProps("SegmentedControl")?.Tabs;
+const NativeSegmentedControl =
+  findByDisplayName("SegmentedControl") || findByProps("SegmentedControl")?.SegmentedControl;
 
-export default function NotificationCenterUI(): JSX.Element {
-  if (typeof useProxy === "function" && storage) {
-    try {
-      useProxy(storage);
-    } catch (e) {
-      // Ignored
-    }
-  }
+const styles = stylesheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#1e1f22",
+  },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#f2f3f5",
+  },
+  clearText: {
+    color: "#f23f43",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  segmentWrapper: {
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+  },
+  card: {
+    backgroundColor: "#2b2d31",
+    marginHorizontal: 12,
+    marginVertical: 4,
+    borderRadius: 8,
+    padding: 12,
+  },
+  cardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  avatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    marginRight: 10,
+    backgroundColor: "#35373c",
+  },
+  headerTextContainer: {
+    flex: 1,
+  },
+  itemTitle: {
+    color: "#f2f3f5",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  location: {
+    color: "#949ba4",
+    fontSize: 12,
+  },
+  time: {
+    color: "#949ba4",
+    fontSize: 11,
+  },
+  content: {
+    color: "#dbdee1",
+    fontSize: 13,
+    marginTop: 2,
+  },
+  empty: {
+    padding: 32,
+    textAlign: "center",
+    color: "#949ba4",
+    fontSize: 14,
+  },
+});
 
-  const [activeTab, setActiveTab] = useState<NotificationCategory>("mentions");
-  const [mentionFilter, setMentionFilter] = useState<"all" | MentionSubCategory>("all");
+export default function NotificationCenterUI() {
+  const [, forceUpdate] = React.useReducer((x) => x + 1, 0);
+  const [activeCategory, setActiveCategory] = React.useState<NotificationCategory>("all");
+  const [mentionSubCategory, setMentionSubCategory] = React.useState<MentionSubCategory>("all");
 
-  const pluginStorage = (storage as LocalStorage) || { notifications: [] };
-  const notifications: NotificationItem[] = pluginStorage.notifications || [];
+  React.useEffect(() => {
+    return subscribeToNotifications(() => forceUpdate());
+  }, []);
 
-  const filteredNotifications = notifications.filter((n) => {
-    if (activeTab === "mentions") {
-      if (n.category !== "mentions") return false;
-      if (mentionFilter === "people") return n.subCategory === "people";
-      if (mentionFilter === "bot") return n.subCategory === "bot";
-      return true;
-    }
-    return n.category === activeTab;
-  });
-
-  const jumpToMessage = (guildId?: string, channelId?: string, messageId?: string): void => {
-    if (!channelId || !messageId) return;
-
+  const jumpToMessage = (item: NotificationItem) => {
+    if (!item.channelId) return;
     try {
       if (Router?.transitionToGuild) {
-        Router.transitionToGuild(guildId || "@me", channelId, messageId);
+        Router.transitionToGuild(item.guildId || "@me", item.channelId, item.messageId);
       } else if (NavigationNative?.navigate) {
-        NavigationNative.navigate("Channel", { guildId, channelId, messageId });
+        NavigationNative.navigate("Channel", {
+          guildId: item.guildId || "@me",
+          channelId: item.channelId,
+          messageId: item.messageId,
+        });
       }
     } catch (err) {
-      console.error("[BetterInbox] Navigation error:", err);
+      console.error("[BetterInbox] Deep-link error:", err);
     }
   };
 
-  const tabs: NotificationCategory[] = ["mentions", "replies", "reactions", "other"];
-  const subFilters: Array<"all" | MentionSubCategory> = ["all", "people", "bot"];
+  const allNotifications = getNotifications();
+
+  const filteredNotifications = allNotifications.filter((item) => {
+    if (activeCategory !== "all" && item.category !== activeCategory) return false;
+    if (activeCategory === "mentions" && mentionSubCategory !== "all") {
+      if (item.subCategory !== mentionSubCategory) return false;
+    }
+    return true;
+  });
+
+  const categoryTabs = [
+    { id: "all", label: "All" },
+    { id: "mentions", label: "Mentions" },
+    { id: "replies", label: "Replies" },
+    { id: "reactions", label: "Reactions" },
+    { id: "friend_request", label: "Requests" },
+    { id: "threads", label: "Threads" },
+    { id: "other", label: "Status" },
+  ];
+
+  const subCategoryOptions = [
+    { id: "all", label: "ALL" },
+    { id: "people", label: "PEOPLE" },
+    { id: "role", label: "ROLE" },
+    { id: "bot", label: "BOT" },
+  ];
 
   return (
     <View style={styles.container}>
-      {/* Top Tab Bar */}
-      <View style={styles.tabBar}>
-        {tabs.map((tab) => (
-          <TouchableOpacity
-            key={tab}
-            style={[styles.tabButton, activeTab === tab && styles.activeTabButton]}
-            onPress={() => setActiveTab(tab)}
-          >
-            <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
-            </Text>
-          </TouchableOpacity>
-        ))}
+      <View style={styles.header}>
+        <Text style={styles.title}>Inbox</Text>
+        <TouchableOpacity onPress={clearAllNotifications}>
+          <Text style={styles.clearText}>Clear All</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* Sub-Filter Bar for Mentions */}
-      {activeTab === "mentions" && (
-        <View style={styles.subFilterBar}>
-          {subFilters.map((sub) => (
+      {/* Primary Category Selector */}
+      {NativeTabs ? (
+        <NativeTabs
+          activeTab={activeCategory}
+          onTabChange={(id: NotificationCategory) => setActiveCategory(id)}
+          tabs={categoryTabs}
+        />
+      ) : (
+        <FlatList
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          data={categoryTabs}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
             <TouchableOpacity
-              key={sub}
-              style={[styles.subFilterButton, mentionFilter === sub && styles.activeSubFilter]}
-              onPress={() => setMentionFilter(sub)}
+              style={{
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+                backgroundColor: activeCategory === item.id ? "#5865f2" : "#2b2d31",
+                borderRadius: 16,
+                marginHorizontal: 4,
+                marginBottom: 8,
+              }}
+              onPress={() => setActiveCategory(item.id as NotificationCategory)}
             >
-              <Text style={styles.subFilterText}>{sub.toUpperCase()}</Text>
+              <Text style={{ color: "#ffffff", fontWeight: "600", fontSize: 13 }}>{item.label}</Text>
             </TouchableOpacity>
-          ))}
+          )}
+        />
+      )}
+
+      {/* Sub-Filter for Mentions */}
+      {activeCategory === "mentions" && (
+        <View style={styles.segmentWrapper}>
+          {NativeSegmentedControl ? (
+            <NativeSegmentedControl
+              values={subCategoryOptions.map((o) => o.label)}
+              selectedIndex={subCategoryOptions.findIndex((o) => o.id === mentionSubCategory)}
+              onChange={(index: number) => setMentionSubCategory(subCategoryOptions[index].id as MentionSubCategory)}
+            />
+          ) : (
+            <View style={{ flexDirection: "row", justifyContent: "space-around" }}>
+              {subCategoryOptions.map((opt) => (
+                <TouchableOpacity
+                  key={opt.id}
+                  onPress={() => setMentionSubCategory(opt.id as MentionSubCategory)}
+                  style={{
+                    paddingVertical: 4,
+                    paddingHorizontal: 8,
+                    borderBottomWidth: mentionSubCategory === opt.id ? 2 : 0,
+                    borderBottomColor: "#5865f2",
+                  }}
+                >
+                  <Text style={{ color: mentionSubCategory === opt.id ? "#ffffff" : "#949ba4", fontSize: 12 }}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
         </View>
       )}
 
-      {/* Main Feed View */}
-      <ScrollView style={styles.feed}>
-        {filteredNotifications.length === 0 ? (
-          <Text style={styles.emptyText}>No notifications found for this category.</Text>
-        ) : (
-          filteredNotifications.map((item) => (
-            <TouchableOpacity
-              key={item.id}
-              style={styles.card}
-              onPress={() => jumpToMessage(item.guildId, item.channelId, item.messageId)}
-            >
-              <Image
-                source={{
-                  uri: item.author?.avatar
-                    ? `https://cdn.discordapp.com/avatars/${item.author.id}/${item.author.avatar}.png`
-                    : "https://cdn.discordapp.com/embed/avatars/0.png",
-                }}
-                style={styles.avatar}
-              />
+      {/* Notification List */}
+      <FlatList
+        data={filteredNotifications}
+        keyExtractor={(item) => item.id}
+        ListEmptyComponent={<Text style={styles.empty}>No notifications found.</Text>}
+        renderItem={({ item }) => {
+          const avatarUrl = item.author?.id
+            ? AvatarUtils?.getUserAvatarURL?.(item.author)
+            : null;
 
-              <View style={styles.cardContent}>
-                <View style={styles.cardHeader}>
-                  <Text style={styles.authorTitle}>{item.title}</Text>
-                  <Text style={styles.timestamp}>{item.timestamp}</Text>
+          return (
+            <TouchableOpacity style={styles.card} onPress={() => jumpToMessage(item)}>
+              <View style={styles.cardHeader}>
+                {avatarUrl ? (
+                  <Image source={{ uri: avatarUrl }} style={styles.avatar} />
+                ) : (
+                  <View style={styles.avatar} />
+                )}
+                <View style={styles.headerTextContainer}>
+                  <Text style={styles.itemTitle}>{item.title}</Text>
+                  {item.guildName ? (
+                    <Text style={styles.location}>
+                      {item.guildName} • {item.channelName}
+                    </Text>
+                  ) : null}
                 </View>
-
-                <Text style={styles.location}>
-                  {item.guildName} — {item.channelName}
-                </Text>
-
-                <Text style={styles.messageContent} numberOfLines={2}>
-                  {item.content}
-                </Text>
+                <Text style={styles.time}>{item.timestamp}</Text>
               </View>
+              {item.content ? <Text style={styles.content}>{item.content}</Text> : null}
             </TouchableOpacity>
-          ))
-        )}
-      </ScrollView>
+          );
+        }}
+      />
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#313338" },
-  tabBar: { flexDirection: "row", backgroundColor: "#2b2d31", paddingVertical: 6 },
-  tabButton: { flex: 1, paddingVertical: 10, alignItems: "center" },
-  activeTabButton: { borderBottomWidth: 2, borderBottomColor: "#5865F2" },
-  tabText: { color: "#949ba4", fontWeight: "600", fontSize: 13 },
-  activeTabText: { color: "#ffffff" },
-  subFilterBar: { flexDirection: "row", backgroundColor: "#1e1f22", padding: 6, justifyContent: "center" },
-  subFilterButton: { marginHorizontal: 8, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
-  activeSubFilter: { backgroundColor: "#404249" },
-  subFilterText: { color: "#dbdee1", fontSize: 11, fontWeight: "bold" },
-  feed: { flex: 1, padding: 12 },
-  emptyText: { color: "#949ba4", textAlign: "center", marginTop: 40, fontSize: 14 },
-  card: {
-    flexDirection: "row",
-    backgroundColor: "#2b2d31",
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 10,
-    alignItems: "center",
-  },
-  avatar: { width: 42, height: 42, borderRadius: 21, marginRight: 12 },
-  cardContent: { flex: 1 },
-  cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  authorTitle: { color: "#f2f3f5", fontWeight: "bold", fontSize: 14 },
-  timestamp: { color: "#949ba4", fontSize: 11 },
-  location: { color: "#5865F2", fontSize: 12, marginVertical: 2, fontWeight: "500" },
-  messageContent: { color: "#dbdee1", fontSize: 13 },
-});
