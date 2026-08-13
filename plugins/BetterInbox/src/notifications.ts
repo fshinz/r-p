@@ -53,7 +53,6 @@ export function subscribeToNotifications(callback: () => void): () => void {
   return () => listeners.delete(callback);
 }
 
-// Handlers
 function handleIncomingMessage(payload: any) {
   try {
     const currentUser = UserStore?.getCurrentUser?.();
@@ -209,7 +208,6 @@ function handlePresenceUpdates(payload: any) {
 
     const currentUser = UserStore?.getCurrentUser?.();
 
-    // Safe retrieval of friend IDs array across mobile Discord client builds
     const friendMap = RelationshipStore?.getRelationships?.() || {};
     const friendIds: string[] = typeof RelationshipStore?.getFriendIDs === "function" 
       ? RelationshipStore.getFriendIDs() 
