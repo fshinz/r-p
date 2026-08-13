@@ -13,11 +13,10 @@ const extensions = [".js", ".jsx", ".mjs", ".ts", ".tsx", ".cts", ".mts"];
 /** @type import("rollup").InputPluginOption */
 const plugins = [
     nodeResolve({
-        // Prevent resolving react-native or vendetta from node_modules
         resolveOnly: (moduleName) => 
             !moduleName.startsWith("react") && 
             !moduleName.startsWith("react-native") && 
-            !moduleName.startsWith("@vendetta")
+            !moduleName.startsWith("@vendetta"),
     }),
     commonjs(),
     {
@@ -61,12 +60,11 @@ for (let plug of await readdir("./plugins")) {
     try {
         const bundle = await rollup({
             input: `./plugins/${plug}/${manifest.main}`,
-            // Mark client runtime libraries as external
             external: [
                 "react",
                 "react-native",
                 /^react-native(\/.*)?$/,
-                /^@vendetta(\/.*)?$/
+                /^@vendetta(\/.*)?$/,
             ],
             onwarn: () => {},
             plugins,
