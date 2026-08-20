@@ -40,26 +40,26 @@ const PLATFORMS = [
     {
         label: "Desktop (Windows)",
         value: "desktop",
-        subLabel: "Shows Windows client icon",
+        subLabel: "Shows Desktop client icon",
         // Forces black monitor icon to render white/light
         icon: () => renderIcon("ic_monitor", "#ffffff"), 
     },
     {
         label: "Web / Browser (Chrome)",
         value: "web",
-        subLabel: "Shows Chrome Linux icon",
+        subLabel: "Shows Browser icon",
         icon: () => renderIcon("GlobeEarthIcon"),
     },
     {
         label: "Meta Quest / VR",
         value: "meta",
-        subLabel: "Shows VR status",
+        subLabel: "Shows VR Icon",
         icon: () => renderIcon("ic_vr_headset_24px"),
     },
     {
         label: "Console (PlayStation)",
         value: "console",
-        subLabel: "Shows PlayStation status",
+        subLabel: "Shows PlayStation Icon",
         icon: () => renderIcon("ic_playstation_device_ps5_32px"),
     },
 ];
@@ -89,7 +89,7 @@ export default function Settings() {
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 12 }}>
             <Stack spacing={16}>
                 <TableRadioGroup
-                    title="SELECT SPOOFED PLATFORM"
+                    title="select a platform to spoof"
                     value={selected}
                     onChange={(val: string) => handleSelect(val)}
                 >
