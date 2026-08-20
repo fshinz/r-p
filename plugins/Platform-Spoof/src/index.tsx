@@ -1,11 +1,11 @@
 import { storage } from "@vendetta/plugin";
-import { React, ReactNative } from "@vendetta/metro";
 import { findByProps } from "@vendetta/metro";
+import { React } from "@vendetta/metro/common";
 import { Forms } from "@vendetta/ui/components";
 
 const { FormRadioRow, FormSection } = Forms;
 
-// Find socket module safely using direct findByProps
+// Find socket module safely
 const socketModule = findByProps("getSocket", "isConnected");
 
 const PLATFORMS = [
@@ -112,6 +112,7 @@ function reconnectGateway() {
 }
 
 function Settings() {
+    // React is imported from @vendetta/metro/common
     const [selected, setSelected] = React.useState(storage.platform || "off");
 
     return (
