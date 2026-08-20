@@ -1,12 +1,12 @@
 import { storage } from "@vendetta/plugin";
-import { React, ReactNative, metro, assets } from "@vendetta/metro";
+import { React, ReactNative } from "@vendetta/metro";
+import { findByProps } from "@vendetta/metro";
 import { Forms } from "@vendetta/ui/components";
 
-const { View, Text, Pressable, Image } = ReactNative;
 const { FormRadioRow, FormSection } = Forms;
 
-// Find socket module dynamically
-const socketModule = metro.findByProps("getSocket", "isConnected");
+// Find socket module safely using direct findByProps
+const socketModule = findByProps("getSocket", "isConnected");
 
 const PLATFORMS = [
     { label: "Off", value: "off" },
@@ -53,9 +53,7 @@ const SPOOF_PROPERTIES = {
 
 const IDENTIFY = 2;
 let unpatchSocket = null;
-let unpatchWs = null;
 
-// Helper to update properties on payload
 function applySpoof(data) {
     const currentPlatform = storage.platform || "off";
     if (currentPlatform === "off" || !SPOOF_PROPERTIES[currentPlatform]) return;
@@ -65,12 +63,10 @@ function applySpoof(data) {
     }
 }
 
-// Gateway patching logic
 function patchGateway() {
     const socket = socketModule?.getSocket();
     if (!socket) return;
 
-    // Patch socket.send
     const origSend = socket.send;
     socket.send = function (op, data, flag) {
         if (op === IDENTIFY && data) {
@@ -79,7 +75,6 @@ function patchGateway() {
         return origSend.call(this, op, data, flag);
     };
 
-    // Patch underlying WebSocket transport send
     const ws = socket.webSocket;
     let origWsSend = null;
     if (ws && typeof ws.send === "function") {
@@ -98,7 +93,6 @@ function patchGateway() {
         };
     }
 
-    // Return cleanup handle
     return () => {
         if (socket) socket.send = origSend;
         if (ws && origWsSend) ws.send = origWsSend;
@@ -109,16 +103,14 @@ function reconnectGateway() {
     const socket = socketModule?.getSocket();
     if (!socket) return;
     
-    // Force reconnect to re-trigger IDENTIFY with new properties
     socket.sessionId = null;
     if (socket.webSocket) {
         socket.webSocket.close();
-    } else {
+    } else if (typeof socket.close === "function") {
         socket.close();
     }
 }
 
-// Settings UI Component
 function Settings() {
     const [selected, setSelected] = React.useState(storage.platform || "off");
 
@@ -140,13 +132,10 @@ function Settings() {
     );
 }
 
-// Plugin Lifecycle
 export default {
     onLoad: () => {
-        // Set default storage value
         if (!storage.platform) storage.platform = "off";
 
-        // Delay slightly to ensure socket module is ready
         setTimeout(() => {
             unpatchSocket = patchGateway();
         }, 500);
