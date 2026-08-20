@@ -1,15 +1,11 @@
-import { storage } from "@vendetta/plugin";
-import { findByProps, findByDisplayName } from "@vendetta/metro";
+import { findByProps } from "@vendetta/metro";
 import { React, ReactNative } from "@vendetta/metro/common";
+import { storage } from "@vendetta/plugin";
+import { Forms } from "@vendetta/ui/components";
 
-const { View, Text, Pressable, ScrollView } = ReactNative;
+const { ScrollView } = ReactNative;
+const { FormSection, FormRadioRow } = Forms;
 
-// Safely retrieve Discord's native TableRow and Radio components from Metro
-const TableRow = findByProps("TableRow")?.TableRow || findByDisplayName("TableRow");
-const TableRowGroup = findByProps("TableRowGroup")?.TableRowGroup || findByDisplayName("TableRowGroup");
-const Radio = findByProps("Radio")?.Radio || findByDisplayName("Radio");
-
-// Find socket module safely
 const socketModule = findByProps("getSocket", "isConnected");
 
 const PLATFORMS = [
@@ -18,9 +14,11 @@ const PLATFORMS = [
     { label: "Web / Browser (Chrome)", value: "web", subLabel: "Shows Chrome Linux icon" },
     { label: "Meta Quest / VR", value: "meta", subLabel: "Shows VR status" },
     { label: "Console (PlayStation)", value: "console", subLabel: "Shows PlayStation status" },
-];
+] as const;
 
-const SPOOF_PROPERTIES = {
+type PlatformKey = typeof PLATFORMS[number]["value"];
+
+const SPOOF_PROPERTIES: Record<Exclude<PlatformKey, "off">, Record<string, string>> = {
     desktop: {
         os: "Windows",
         browser: "Discord Client",
@@ -56,10 +54,10 @@ const SPOOF_PROPERTIES = {
 };
 
 const IDENTIFY = 2;
-let unpatchSocket = null;
+let unpatchSocket: (() => void) | null = null;
 
-function applySpoof(data) {
-    const currentPlatform = storage.platform || "off";
+function applySpoof(data: any) {
+    const currentPlatform = (storage.platform || "off") as PlatformKey;
     if (currentPlatform === "off" || !SPOOF_PROPERTIES[currentPlatform]) return;
 
     if (data && data.properties) {
@@ -69,10 +67,10 @@ function applySpoof(data) {
 
 function patchGateway() {
     const socket = socketModule?.getSocket();
-    if (!socket) return;
+    if (!socket) return null;
 
     const origSend = socket.send;
-    socket.send = function (op, data, flag) {
+    socket.send = function (op: number, data: any, flag: any) {
         if (op === IDENTIFY && data) {
             applySpoof(data);
         }
@@ -80,10 +78,10 @@ function patchGateway() {
     };
 
     const ws = socket.webSocket;
-    let origWsSend = null;
+    let origWsSend: any = null;
     if (ws && typeof ws.send === "function") {
         origWsSend = ws.send;
-        ws.send = function (data) {
+        ws.send = function (data: any) {
             if (typeof data === "string") {
                 try {
                     const parsed = JSON.parse(data);
@@ -106,7 +104,7 @@ function patchGateway() {
 function reconnectGateway() {
     const socket = socketModule?.getSocket();
     if (!socket) return;
-    
+
     socket.sessionId = null;
     if (socket.webSocket) {
         socket.webSocket.close();
@@ -115,104 +113,20 @@ function reconnectGateway() {
     }
 }
 
-// Fallback custom TableRow builder in case Metro components aren't resolved
-function NativeTableRow({ label, subLabel, selected, onPress }) {
-    return (
-        <Pressable
-            onPress={onPress}
-            style={{
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "space-between",
-                paddingVertical: 12,
-                paddingHorizontal: 16,
-                backgroundColor: "rgba(255, 255, 255, 0.03)",
-                borderBottomWidth: 1,
-                borderBottomColor: "rgba(255, 255, 255, 0.05)",
-            }}
-        >
-            <View style={{ flex: 1, paddingRight: 10 }}>
-                <Text style={{ color: "#FFFFFF", fontSize: 16, fontWeight: "500" }}>{label}</Text>
-                {subLabel ? (
-                    <Text style={{ color: "#949BA4", fontSize: 12, marginTop: 2 }}>{subLabel}</Text>
-                ) : null}
-            </View>
-            {Radio ? (
-                <Radio selected={selected} />
-            ) : (
-                <View
-                    style={{
-                        width: 20,
-                        height: 20,
-                        borderRadius: 10,
-                        borderWidth: 2,
-                        borderColor: selected ? "#5865F2" : "#B5BAC1",
-                        alignItems: "center",
-                        justifyContent: "center",
-                    }}
-                >
-                    {selected && (
-                        <View
-                            style={{
-                                width: 10,
-                                height: 10,
-                                borderRadius: 5,
-                                backgroundColor: "#5865F2",
-                            }}
-                        />
-                    )}
-                </View>
-            )}
-        </Pressable>
-    );
-}
-
 function Settings() {
-    const [selected, setSelected] = React.useState(storage.platform || "off");
+    const [selected, setSelected] = React.useState<PlatformKey>(storage.platform || "off");
 
-    const handleSelect = (value) => {
+    const handleSelect = (value: PlatformKey) => {
         storage.platform = value;
         setSelected(value);
         reconnectGateway();
     };
 
-    // Use Discord's native TableRow / TableRowGroup if resolved by Metro
-    if (TableRow && TableRowGroup) {
-        return (
-            <ScrollView style={{ flex: 1 }}>
-                <TableRowGroup title="PLATFORM SPOOF">
-                    {PLATFORMS.map((opt) => (
-                        <TableRow
-                            key={opt.value}
-                            label={opt.label}
-                            subLabel={opt.subLabel}
-                            action={Radio ? <Radio selected={selected === opt.value} /> : null}
-                            onPress={() => handleSelect(opt.value)}
-                        />
-                    ))}
-                </TableRowGroup>
-            </ScrollView>
-        );
-    }
-
-    // Direct React Native fallback guaranteeing Table Row appearance
     return (
-        <ScrollView style={{ flex: 1, paddingTop: 10 }}>
-            <Text
-                style={{
-                    color: "#949BA4",
-                    fontSize: 12,
-                    fontWeight: "700",
-                    marginLeft: 16,
-                    marginBottom: 8,
-                    letterSpacing: 0.5,
-                }}
-            >
-                SELECT PLATFORM
-            </Text>
-            <View style={{ borderRadius: 8, overflow: "hidden", marginHorizontal: 10 }}>
+        <ScrollView style={{ flex: 1 }}>
+            <FormSection title="PLATFORM SPOOF">
                 {PLATFORMS.map((opt) => (
-                    <NativeTableRow
+                    <FormRadioRow
                         key={opt.value}
                         label={opt.label}
                         subLabel={opt.subLabel}
@@ -220,7 +134,7 @@ function Settings() {
                         onPress={() => handleSelect(opt.value)}
                     />
                 ))}
-            </View>
+            </FormSection>
         </ScrollView>
     );
 }
