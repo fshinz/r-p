@@ -1,20 +1,8 @@
-import { storage } from "@vendetta/plugin";
 import { findByProps } from "@vendetta/metro";
-import { React } from "@vendetta/metro/common";
-import { Forms } from "@vendetta/ui/components";
+import { storage } from "@vendetta/plugin";
+import Settings from "./settings";
 
-const { FormRadioRow, FormSection } = Forms;
-
-// Find socket module safely
 const socketModule = findByProps("getSocket", "isConnected");
-
-const PLATFORMS = [
-    { label: "Off", value: "off" },
-    { label: "Desktop (Windows)", value: "desktop" },
-    { label: "Web / Browser (Chrome)", value: "web" },
-    { label: "Meta Quest / VR", value: "meta" },
-    { label: "Console (PlayStation)", value: "console" },
-];
 
 const SPOOF_PROPERTIES = {
     desktop: {
@@ -52,9 +40,9 @@ const SPOOF_PROPERTIES = {
 };
 
 const IDENTIFY = 2;
-let unpatchSocket = null;
+let unpatchSocket: (() => void) | null = null;
 
-function applySpoof(data) {
+function applySpoof(data: any) {
     const currentPlatform = storage.platform || "off";
     if (currentPlatform === "off" || !SPOOF_PROPERTIES[currentPlatform]) return;
 
@@ -65,10 +53,10 @@ function applySpoof(data) {
 
 function patchGateway() {
     const socket = socketModule?.getSocket();
-    if (!socket) return;
+    if (!socket) return null;
 
     const origSend = socket.send;
-    socket.send = function (op, data, flag) {
+    socket.send = function (op: number, data: any, flag: any) {
         if (op === IDENTIFY && data) {
             applySpoof(data);
         }
@@ -76,10 +64,10 @@ function patchGateway() {
     };
 
     const ws = socket.webSocket;
-    let origWsSend = null;
+    let origWsSend: any = null;
     if (ws && typeof ws.send === "function") {
         origWsSend = ws.send;
-        ws.send = function (data) {
+        ws.send = function (data: any) {
             if (typeof data === "string") {
                 try {
                     const parsed = JSON.parse(data);
@@ -97,40 +85,6 @@ function patchGateway() {
         if (socket) socket.send = origSend;
         if (ws && origWsSend) ws.send = origWsSend;
     };
-}
-
-function reconnectGateway() {
-    const socket = socketModule?.getSocket();
-    if (!socket) return;
-    
-    socket.sessionId = null;
-    if (socket.webSocket) {
-        socket.webSocket.close();
-    } else if (typeof socket.close === "function") {
-        socket.close();
-    }
-}
-
-function Settings() {
-    // React is imported from @vendetta/metro/common
-    const [selected, setSelected] = React.useState(storage.platform || "off");
-
-    return (
-        <FormSection title="Select Spoofed Platform">
-            {PLATFORMS.map((opt) => (
-                <FormRadioRow
-                    key={opt.value}
-                    label={opt.label}
-                    selected={selected === opt.value}
-                    onPress={() => {
-                        storage.platform = opt.value;
-                        setSelected(opt.value);
-                        reconnectGateway();
-                    }}
-                />
-            ))}
-        </FormSection>
-    );
 }
 
 export default {
