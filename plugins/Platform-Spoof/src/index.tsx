@@ -1,127 +1,158 @@
-import { findByProps } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
-import * as vendettaPatcher from "@vendetta/patcher";
-import Settings from "./Settings";
+import { React, ReactNative, metro, assets } from "@vendetta/metro";
+import { Forms } from "@vendetta/ui/components";
+
+const { View, Text, Pressable, Image } = ReactNative;
+const { FormRadioRow, FormSection } = Forms;
+
+// Find socket module dynamically
+const socketModule = metro.findByProps("getSocket", "isConnected");
+
+const PLATFORMS = [
+    { label: "Off", value: "off" },
+    { label: "Desktop (Windows)", value: "desktop" },
+    { label: "Web / Browser (Chrome)", value: "web" },
+    { label: "Meta Quest / VR", value: "meta" },
+    { label: "Console (PlayStation)", value: "console" },
+];
+
+const SPOOF_PROPERTIES = {
+    desktop: {
+        os: "Windows",
+        browser: "Discord Client",
+        device: "",
+        release_channel: "stable",
+        client_version: "1.0.9187",
+        os_version: "10.0.19045",
+    },
+    web: {
+        os: "Linux",
+        browser: "Chrome",
+        device: "",
+        release_channel: "stable",
+        client_version: "9999",
+        browser_user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        browser_version: "124.0.0.0",
+    },
+    meta: {
+        os: "Android",
+        browser: "Discord VR",
+        device: "Meta Quest",
+        release_channel: "stable",
+        client_version: "1.0.0",
+        os_version: "12",
+    },
+    console: {
+        os: "Playstation",
+        browser: "Discord Embedded",
+        device: "PlayStation",
+        release_channel: "stable",
+        client_version: "1.0.0",
+    },
+};
 
 const IDENTIFY = 2;
+let unpatchSocket = null;
+let unpatchWs = null;
 
-export type Platform = "off" | "desktop" | "web" | "mobile" | "meta" | "console";
+// Helper to update properties on payload
+function applySpoof(data) {
+    const currentPlatform = storage.platform || "off";
+    if (currentPlatform === "off" || !SPOOF_PROPERTIES[currentPlatform]) return;
 
-// Safely obtain patcher methods across Vendetta / Revenge / Bunny variations
-function getPatcher() {
-    return (vendettaPatcher as any)?.before ? vendettaPatcher : (window as any)?.vendetta?.patcher;
-}
-
-export function getSpoofProps(): Record<string, string> | null {
-    const currentPlatform = storage?.platform ?? "desktop";
-    switch (currentPlatform as Platform) {
-        case "desktop": return { os: "Windows",     browser: "Discord Client",   device: "" };
-        case "web":     return { os: "Linux",       browser: "Chrome",           device: "" };
-        case "mobile":  return { os: "Android",     browser: "Discord Android",  device: "Discord Android" };
-        case "meta":    return { os: "Android",     browser: "Discord VR",       device: "Meta Quest" };
-        case "console": return { os: "Playstation", browser: "Discord Embedded", device: "PlayStation" };
-        default:        return null;
+    if (data && data.properties) {
+        Object.assign(data.properties, SPOOF_PROPERTIES[currentPlatform]);
     }
 }
 
-let unpatches: Array<any> = [];
+// Gateway patching logic
+function patchGateway() {
+    const socket = socketModule?.getSocket();
+    if (!socket) return;
 
-export function forceIdentify() {
-    if (storage?.platform === "off") return;
-
-    try {
-        const gatewayModule = findByProps("getSocket", "isConnected");
-        const socket = gatewayModule?.getSocket?.();
-        if (!socket) return;
-
-        socket.sessionId = null;
-        socket.seq = 0;
-
-        const ws = socket.webSocket;
-        if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
-            ws.close(1000);
-        } else if (typeof socket.close === "function") {
-            socket.close();
-            setTimeout(() => {
-                try { socket.connect?.(); } catch (_) {}
-            }, 500);
+    // Patch socket.send
+    const origSend = socket.send;
+    socket.send = function (op, data, flag) {
+        if (op === IDENTIFY && data) {
+            applySpoof(data);
         }
-    } catch (e) {
-        console.error("[PlatformSpoof] Error in forceIdentify:", e);
-    }
-}
+        return origSend.call(this, op, data, flag);
+    };
 
-export default {
-    onLoad() {
-        if (storage) {
-            storage.platform ??= "desktop";
-        }
-        unpatches = [];
-
-        try {
-            const patcher = getPatcher();
-            if (!patcher?.before) {
-                console.error("[PlatformSpoof] Patcher module not found.");
-                return;
-            }
-
-            const gatewayModule = findByProps("getSocket", "isConnected");
-            const socket = gatewayModule?.getSocket?.();
-
-            if (socket) {
-                const socketProto = Object.getPrototypeOf(socket);
-                const target = socketProto?.send ? socketProto : socket;
-
-                if (typeof target?.send === "function") {
-                    const unpatchSend = patcher.before(target, "send", (args: any[]) => {
-                        const [op, data] = args;
-                        if (op === IDENTIFY && data?.properties) {
-                            const spoof = getSpoofProps();
-                            if (spoof) {
-                                Object.assign(data.properties, spoof);
-                            }
-                        }
-                    });
-                    if (unpatchSend) unpatches.push(unpatchSend);
-                }
-            }
-
-            const SuperProps = findByProps("getSuperProperties");
-            if (SuperProps?.getSuperProperties) {
-                const unpatchSuperProps = patcher.after(SuperProps, "getSuperProperties", (_: any, ret: any) => {
-                    const spoof = getSpoofProps();
-                    if (spoof && ret) {
-                        ret.os = spoof.os;
-                        ret.browser = spoof.browser;
-                        ret.device = spoof.device;
+    // Patch underlying WebSocket transport send
+    const ws = socket.webSocket;
+    let origWsSend = null;
+    if (ws && typeof ws.send === "function") {
+        origWsSend = ws.send;
+        ws.send = function (data) {
+            if (typeof data === "string") {
+                try {
+                    const parsed = JSON.parse(data);
+                    if (parsed?.op === IDENTIFY && parsed.d) {
+                        applySpoof(parsed.d);
+                        data = JSON.stringify(parsed);
                     }
-                    return ret;
-                });
-                if (unpatchSuperProps) unpatches.push(unpatchSuperProps);
+                } catch (e) {}
             }
+            return origWsSend.call(this, data);
+        };
+    }
 
-            if (gatewayModule?.isConnected?.()) {
-                forceIdentify();
-            }
-        } catch (err) {
-            console.error("[PlatformSpoof] Error inside onLoad:", err);
-        }
+    // Return cleanup handle
+    return () => {
+        if (socket) socket.send = origSend;
+        if (ws && origWsSend) ws.send = origWsSend;
+    };
+}
+
+function reconnectGateway() {
+    const socket = socketModule?.getSocket();
+    if (!socket) return;
+    
+    // Force reconnect to re-trigger IDENTIFY with new properties
+    socket.sessionId = null;
+    if (socket.webSocket) {
+        socket.webSocket.close();
+    } else {
+        socket.close();
+    }
+}
+
+// Settings UI Component
+function Settings() {
+    const [selected, setSelected] = React.useState(storage.platform || "off");
+
+    return (
+        <FormSection title="Select Spoofed Platform">
+            {PLATFORMS.map((opt) => (
+                <FormRadioRow
+                    key={opt.value}
+                    label={opt.label}
+                    selected={selected === opt.value}
+                    onPress={() => {
+                        storage.platform = opt.value;
+                        setSelected(opt.value);
+                        reconnectGateway();
+                    }}
+                />
+            ))}
+        </FormSection>
+    );
+}
+
+// Plugin Lifecycle
+export default {
+    onLoad: () => {
+        // Set default storage value
+        if (!storage.platform) storage.platform = "off";
+
+        // Delay slightly to ensure socket module is ready
+        setTimeout(() => {
+            unpatchSocket = patchGateway();
+        }, 500);
     },
-
-    onUnload() {
-        for (const unpatch of unpatches) {
-            try {
-                if (typeof unpatch === "function") {
-                    unpatch();
-                } else if (unpatch && typeof unpatch.unpatch === "function") {
-                    unpatch.unpatch();
-                }
-            } catch (e) {
-                console.error("[PlatformSpoof] Unpatch failed:", e);
-            }
-        }
-        unpatches = [];
+    onUnload: () => {
+        if (unpatchSocket) unpatchSocket();
     },
-
     settings: Settings,
 };
