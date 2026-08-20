@@ -1,10 +1,25 @@
 import { findByProps } from "@vendetta/metro";
+import { React, ReactNative } from "@vendetta/metro/common";
 import { storage } from "@vendetta/plugin";
-import Settings from "./Settings";
 
+const { ScrollView } = ReactNative;
+
+// Safely resolve components via Metro
+const FormRadioRow = findByProps("FormRadioRow")?.FormRadioRow || findByProps("TableRow", "TableRadioGroup")?.FormRadioRow;
+const FormSection = findByProps("FormSection")?.FormSection || findByProps("TableSection")?.FormSection;
 const socketModule = findByProps("getSocket", "isConnected");
 
-const SPOOF_PROPERTIES = {
+const PLATFORMS = [
+    { label: "Off", value: "off", subLabel: "Default mobile status" },
+    { label: "Desktop (Windows)", value: "desktop", subLabel: "Shows Windows client icon" },
+    { label: "Web / Browser (Chrome)", value: "web", subLabel: "Shows Chrome Linux icon" },
+    { label: "Meta Quest / VR", value: "meta", subLabel: "Shows VR status" },
+    { label: "Console (PlayStation)", value: "console", subLabel: "Shows PlayStation status" },
+] as const;
+
+type PlatformKey = typeof PLATFORMS[number]["value"];
+
+const SPOOF_PROPERTIES: Record<Exclude<PlatformKey, "off">, Record<string, string>> = {
     desktop: {
         os: "Windows",
         browser: "Discord Client",
@@ -43,7 +58,7 @@ const IDENTIFY = 2;
 let unpatchSocket: (() => void) | null = null;
 
 function applySpoof(data: any) {
-    const currentPlatform = storage.platform || "off";
+    const currentPlatform = (storage.platform || "off") as PlatformKey;
     if (currentPlatform === "off" || !SPOOF_PROPERTIES[currentPlatform]) return;
 
     if (data && data.properties) {
@@ -85,6 +100,35 @@ function patchGateway() {
         if (socket) socket.send = origSend;
         if (ws && origWsSend) ws.send = origWsSend;
     };
+}
+
+function Settings() {
+    const [selected, setSelected] = React.useState<PlatformKey>(storage.platform || "off");
+
+    const handleSelect = (value: PlatformKey) => {
+        storage.platform = value;
+        setSelected(value);
+    };
+
+    if (!FormSection || !FormRadioRow) {
+        return null;
+    }
+
+    return (
+        <ScrollView style={{ flex: 1 }}>
+            <FormSection title="PLATFORM SPOOF">
+                {PLATFORMS.map((opt) => (
+                    <FormRadioRow
+                        key={opt.value}
+                        label={opt.label}
+                        subLabel={opt.subLabel}
+                        selected={selected === opt.value}
+                        onPress={() => handleSelect(opt.value)}
+                    />
+                ))}
+            </FormSection>
+        </ScrollView>
+    );
 }
 
 export default {
