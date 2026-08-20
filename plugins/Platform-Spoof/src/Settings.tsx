@@ -1,6 +1,17 @@
-import { React, ReactNative } from "@vendetta/metro/common";
+import { React, ReactNative as RN } from "@vendetta/metro/common";
+import { findByProps } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
-import { Stack, TableRadioGroup, TableRadioRow } from "shared:components";
+import { useProxy } from "@vendetta/storage";
+
+// Safely grab Table elements and ScrollView via Metro
+const { ScrollView } = findByProps("ScrollView");
+const { TableRadioGroup, TableRadioRow, Stack } = findByProps(
+    "TableRadioGroup",
+    "TableRadioRow",
+    "Stack"
+);
+
+const socketModule = findByProps("getSocket", "isConnected");
 
 const PLATFORMS = [
     { label: "Off", value: "off", subLabel: "Default mobile status" },
@@ -8,25 +19,36 @@ const PLATFORMS = [
     { label: "Web / Browser (Chrome)", value: "web", subLabel: "Shows Chrome Linux icon" },
     { label: "Meta Quest / VR", value: "meta", subLabel: "Shows VR status" },
     { label: "Console (PlayStation)", value: "console", subLabel: "Shows PlayStation status" },
-] as const;
+];
 
-type PlatformKey = typeof PLATFORMS[number]["value"];
+function reconnectGateway() {
+    const socket = socketModule?.getSocket();
+    if (!socket) return;
+    
+    socket.sessionId = null;
+    if (socket.webSocket) {
+        socket.webSocket.close();
+    } else if (typeof socket.close === "function") {
+        socket.close();
+    }
+}
 
 export default function Settings() {
-    const [selected, setSelected] = React.useState<PlatformKey>(storage.platform || "off");
+    useProxy(storage);
+    const selected = storage.platform || "off";
 
-    const handleSelect = (value: PlatformKey) => {
+    const handleSelect = (value: string) => {
         storage.platform = value;
-        setSelected(value);
+        reconnectGateway();
     };
 
     return (
-        <ReactNative.ScrollView style={{ flex: 1 }}>
-            <Stack style={{ paddingVertical: 24, paddingHorizontal: 12 }} spacing={24}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 12 }}>
+            <Stack spacing={16}>
                 <TableRadioGroup
-                    title="PLATFORM SPOOF"
+                    title="SELECT SPOOFED PLATFORM"
                     value={selected}
-                    onChange={(v: PlatformKey) => handleSelect(v)}
+                    onChange={(val: string) => handleSelect(val)}
                 >
                     {PLATFORMS.map((opt) => (
                         <TableRadioRow
@@ -34,10 +56,12 @@ export default function Settings() {
                             label={opt.label}
                             subLabel={opt.subLabel}
                             value={opt.value}
+                            selected={selected === opt.value}
+                            onPress={() => handleSelect(opt.value)}
                         />
                     ))}
                 </TableRadioGroup>
             </Stack>
-        </ReactNative.ScrollView>
+        </ScrollView>
     );
 }
