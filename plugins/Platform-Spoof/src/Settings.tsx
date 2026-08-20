@@ -1,59 +1,32 @@
-import { React } from "@vendetta/metro/common";
-import { findByProps } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
-import { useProxy } from "@vendetta/storage";
-import { forceIdentify, Platform } from "./index";
+import { React, Forms } from "@vendetta/metro";
 
-const PLATFORMS: Array<{ label: string; sublabel: string; value: Platform }> = [
-    { label: "Off", sublabel: "Use native client properties", value: "off" },
-    { label: "Desktop (Windows)", sublabel: "Shows green desktop indicator", value: "desktop" },
-    { label: "Web / Browser", sublabel: "Shows web/browser status", value: "web" },
-    { label: "Mobile (Android)", sublabel: "Standard Discord Android client", value: "mobile" },
-    { label: "Meta Quest / VR", sublabel: "Shows VR status", value: "meta" },
-    { label: "Console", sublabel: "Shows PlayStation/Console status", value: "console" },
+const { FormRadioRow, FormSection } = Forms;
+
+const PLATFORMS = [
+    { label: "Off", value: "off" },
+    { label: "Desktop (Windows)", value: "desktop" },
+    { label: "Web / Browser (Chrome)", value: "web" },
+    { label: "Meta Quest / VR", value: "meta" },
+    { label: "Console (PlayStation)", value: "console" },
 ];
 
 export default function Settings() {
-    useProxy(storage);
-
-    // Resolve UI components inside render function to prevent top-level initialization errors
-    const ScrollView = findByProps("ScrollView")?.ScrollView ?? findByProps("ScrollView");
-    const Forms = findByProps("FormSection", "FormRadioRow") ?? (window as any)?.vendetta?.ui?.components?.Forms;
-
-    const FormSection = Forms?.FormSection;
-    const FormRadioRow = Forms?.FormRadioRow;
-    const FormText = Forms?.FormText;
-
-    if (!FormSection || !FormRadioRow) {
-        return null;
-    }
-
-    const Container = ScrollView ?? React.Fragment;
+    const [selected, setSelected] = React.useState(storage.platform || "off");
 
     return (
-        <Container style={{ flex: 1, padding: 16 }}>
-            <FormSection title="PLATFORM SPOOFER">
-                {FormText && (
-                    <FormText color="text-muted" style={{ marginBottom: 12 }}>
-                        Select which platform status Discord's Gateway should broadcast to other users.
-                    </FormText>
-                )}
-
-                {PLATFORMS.map((item) => (
-                    <FormRadioRow
-                        key={item.value}
-                        label={item.label}
-                        subLabel={item.sublabel}
-                        selected={storage?.platform === item.value}
-                        onPress={() => {
-                            if (storage) {
-                                storage.platform = item.value;
-                            }
-                            forceIdentify();
-                        }}
-                    />
-                ))}
-            </FormSection>
-        </Container>
+        <FormSection title="Select Spoofed Platform">
+            {PLATFORMS.map((opt) => (
+                <FormRadioRow
+                    key={opt.value}
+                    label={opt.label}
+                    selected={selected === opt.value}
+                    onPress={() => {
+                        storage.platform = opt.value;
+                        setSelected(opt.value);
+                    }}
+                />
+            ))}
+        </FormSection>
     );
 }
