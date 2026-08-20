@@ -1,6 +1,6 @@
 import { findByProps } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
-import Settings from "./settings";
+import Settings from "./Settings";
 
 const socketModule = findByProps("getSocket", "isConnected");
 
