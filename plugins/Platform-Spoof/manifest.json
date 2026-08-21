@@ -9,6 +9,6 @@
   ],
   "main": "src/index.tsx",
   "vendetta": {
-    "icon": "ic_hide_24px"
+    "icon": "UserPlatformIcon"
   }
 }
