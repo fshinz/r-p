@@ -3,100 +3,115 @@ import { findByProps } from "@vendetta/metro";
 import Settings from "./Settings";
 
 const socketModule = findByProps("getSocket", "isConnected");
+const IDENTIFY = 2;
+
+const patchedTransports = new WeakMap();
+let origSend: Function | null = null;
+let origHandleIdentify: Function | null = null;
+let watchdogInterval: any = null;
 
 const SPOOF_PROPERTIES: Record<string, Record<string, string>> = {
-    desktop: {
-        os: "Windows",
-        browser: "Discord Client",
-        device: "",
-        release_channel: "stable",
-        client_version: "1.0.9187",
-        os_version: "10.0.19045",
-    },
-    web: {
-        os: "Linux",
-        browser: "Chrome",
-        device: "",
-        release_channel: "stable",
-        client_version: "9999",
-        browser_user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        browser_version: "124.0.0.0",
-    },
-    meta: {
-        os: "Android",
-        browser: "Discord VR",
-        device: "Meta Quest",
-        release_channel: "stable",
-        client_version: "1.0.0",
-        os_version: "12",
-    },
-    console: {
-        os: "Playstation",
-        browser: "Discord Embedded",
-        device: "PlayStation",
-        release_channel: "stable",
-        client_version: "1.0.0",
-    },
+    desktop: { os: "Windows", browser: "Discord Client", release_channel: "stable" },
+    web: { os: "Linux", browser: "Chrome", release_channel: "stable" },
+    meta: { os: "Android", browser: "Discord VR", device: "Meta Quest" },
+    console: { os: "Playstation", browser: "Discord Embedded", device: "PlayStation" },
 };
 
-const IDENTIFY = 2;
-let unpatchSocket: (() => void) | null = null;
-
-function applySpoof(data: any) {
-    const currentPlatform = storage.platform || "off";
-    if (currentPlatform === "off" || !SPOOF_PROPERTIES[currentPlatform]) return;
-
-    if (data && data.properties) {
-        Object.assign(data.properties, SPOOF_PROPERTIES[currentPlatform]);
+function applySpoof(target: any) {
+    const platform = storage.platform || "off";
+    if (platform !== "off" && SPOOF_PROPERTIES[platform] && target) {
+        Object.assign(target, SPOOF_PROPERTIES[platform]);
     }
 }
 
-function patchGateway() {
-    const socket = socketModule?.getSocket();
-    if (!socket) return null;
+function patchTransport(socket: any) {
+    const ws = socket?.webSocket;
+    if (!ws || typeof ws.send !== "function" || patchedTransports.has(ws)) return;
 
-    const origSend = socket.send;
+    const origWsSend = ws.send.bind(ws);
+    patchedTransports.set(ws, origWsSend);
+
+    ws.send = function (data: any) {
+        if (typeof data === "string") {
+            try {
+                const parsed = JSON.parse(data);
+                if (parsed?.op === IDENTIFY && parsed.d?.properties) {
+                    applySpoof(parsed.d.properties);
+                    data = JSON.stringify(parsed);
+                }
+            } catch (e) {}
+        }
+        return origWsSend.call(this, data);
+    };
+}
+
+function patchSocket(socket: any) {
+    if (!socket) return;
+    patchTransport(socket);
+
+    if (socket.__psPatched) return;
+
+    origSend = socket.send.bind(socket);
     socket.send = function (op: number, data: any, flag: any) {
-        if (op === IDENTIFY && data) {
-            applySpoof(data);
+        if (op === IDENTIFY && data?.properties) {
+            applySpoof(data.properties);
         }
         return origSend.call(this, op, data, flag);
     };
 
-    const ws = socket.webSocket;
-    let origWsSend: any = null;
-    if (ws && typeof ws.send === "function") {
-        origWsSend = ws.send;
-        ws.send = function (data: any) {
-            if (typeof data === "string") {
-                try {
-                    const parsed = JSON.parse(data);
-                    if (parsed?.op === IDENTIFY && parsed.d) {
-                        applySpoof(parsed.d);
-                        data = JSON.stringify(parsed);
-                    }
-                } catch (e) {}
-            }
-            return origWsSend.call(this, data);
+    if (typeof socket.handleIdentify === "function") {
+        origHandleIdentify = socket.handleIdentify.bind(socket);
+        socket.handleIdentify = function (...args: any[]) {
+            const res = origHandleIdentify!.apply(this, args);
+            patchTransport(socket);
+            return res;
         };
     }
 
-    return () => {
-        if (socket) socket.send = origSend;
-        if (ws && origWsSend) ws.send = origWsSend;
-    };
+    socket.__psPatched = true;
+}
+
+function startWatchdog() {
+    let elapsed = 0;
+    let lastSocket = socketModule?.getSocket();
+
+    watchdogInterval = setInterval(() => {
+        elapsed += 500;
+        const currentSocket = socketModule?.getSocket();
+        
+        if (currentSocket) {
+            patchSocket(currentSocket);
+            if (currentSocket !== lastSocket) {
+                lastSocket = currentSocket;
+            }
+        }
+
+        if (elapsed >= 15000) {
+            clearInterval(watchdogInterval);
+            watchdogInterval = null;
+        }
+    }, 500);
 }
 
 export default {
     onLoad: () => {
         if (!storage.platform) storage.platform = "off";
 
-        setTimeout(() => {
-            unpatchSocket = patchGateway();
-        }, 500);
+        const initialSocket = socketModule?.getSocket();
+        if (initialSocket) {
+            patchSocket(initialSocket);
+        }
+        
+        startWatchdog();
     },
     onUnload: () => {
-        if (unpatchSocket) unpatchSocket();
+        if (watchdogInterval) clearInterval(watchdogInterval);
+        const socket = socketModule?.getSocket();
+        if (socket && origSend) {
+            socket.send = origSend;
+            if (origHandleIdentify) socket.handleIdentify = origHandleIdentify;
+            delete socket.__psPatched;
+        }
     },
     settings: Settings,
 };
