@@ -2,62 +2,80 @@ import { registerCommand } from "@vendetta/commands";
 import { installPlugin, removePlugin, plugins, getSettings } from "@vendetta/plugins";
 import { findByProps, findByName } from "@vendetta/metro";
 import { showToast } from "@vendetta/ui/toasts";
-import { alerts } from "@vendetta/ui";
 import { React } from "@vendetta/metro/common";
 
 let unregisterCommands: Array<() => void> = [];
 
-// Resolve Navigation & Clyde/Message modules using safe fallbacks
+// Resolve Navigation modules
 const Navigation = findByProps("push", "pushLazy", "pop");
 const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
 const modalCloseButton =
     findByProps("getRenderCloseButton")?.getRenderCloseButton ??
     findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
 
-const Clyde = findByProps("sendBotMessage");
-
-// Safely iterate plugins using standard Object.values (as in your snippet)
-function getPluginList() {
-    if (!plugins || typeof plugins !== "object") return [];
+// Helper to reliably format choices for Discord's autocomplete popup
+function buildAutocompleteChoices(query: string) {
+    const q = (query || "").toLowerCase().trim();
     
-    return Object.values(plugins).filter(
-        (p) => p && typeof p === "object" && p.id
-    );
+    if (!plugins || typeof plugins !== "object") {
+        return [{ name: "No plugins loaded", value: "none" }];
+    }
+
+    const entries = Object.entries(plugins);
+
+    if (entries.length === 0) {
+        return [{ name: "No plugins installed", value: "none" }];
+    }
+
+    const matches = entries
+        .map(([id, plugin]: [string, any]) => {
+            const name = plugin?.manifest?.name || id;
+            return {
+                name: `${plugin?.enabled ? "✅" : "❌"} ${name}`,
+                value: id, // Store the raw plugin ID/URL
+                searchKey: name.toLowerCase(),
+            };
+        })
+        .filter((choice) => choice.searchKey.includes(q) || choice.value.toLowerCase().includes(q))
+        .slice(0, 25);
+
+    if (matches.length === 0) {
+        return [{ name: "No matching plugins found", value: "none" }];
+    }
+
+    return matches.map(({ name, value }) => ({ name, value }));
 }
 
-// Safely format authors list
-function formatAuthors(authors: any): string {
-    if (!authors) return "Unknown";
-    if (!Array.isArray(authors)) return "Unknown";
-    return (
-        authors
-            .filter((a) => a && (typeof a === "string" || a.name))
-            .map((a) => (typeof a === "string" ? a : a.name || "Unknown"))
-            .join(", ") || "Unknown"
-    );
-}
+// Open settings page for selected plugin
+function openPluginSettings(pluginId: string) {
+    if (!pluginId || pluginId === "none") return;
 
-// Open settings modal safely
-function openSettingsForPlugin(pluginId: string, pluginName: string) {
+    const plugin = (plugins as Record<string, any>)[pluginId];
+    if (!plugin) {
+        showToast("Plugin not found in store", undefined);
+        return;
+    }
+
     try {
         const SettingsComponent = getSettings(pluginId);
-
         if (!SettingsComponent) {
-            showToast(`${pluginName} has no settings page`, undefined);
+            showToast(`${plugin?.manifest?.name || "Plugin"} has no settings page`, undefined);
             return;
         }
 
         if (!Navigation || !Navigator) {
-            showToast("Navigation stack missing", undefined);
+            showToast("Navigation modules missing", undefined);
             return;
         }
+
+        const title = plugin?.manifest?.name || "Plugin Settings";
 
         Navigation.push(() =>
             React.createElement(Navigator, {
                 initialRouteName: "PluginSettingsModal",
                 screens: {
                     PluginSettingsModal: {
-                        title: pluginName,
+                        title: title,
                         headerLeft: modalCloseButton?.(() => {
                             if (typeof Navigation?.pop === "function") Navigation.pop();
                         }),
@@ -78,12 +96,12 @@ export default {
             registerCommand({
                 name: "plugin-install",
                 displayName: "plugin-install",
-                description: "Install a plugin directly from a manifest URL",
+                description: "Install a client plugin directly from a manifest URL",
                 options: [
                     {
                         name: "url",
                         displayName: "url",
-                        description: "Direct manifest link or GitHub repo URL",
+                        description: "Direct manifest link or repository URL",
                         type: 3, // STRING
                         required: true,
                     },
@@ -103,7 +121,7 @@ export default {
             })
         );
 
-        // 2. /plugin-uninstall (Shows installed list / prompt)
+        // 2. /plugin-uninstall [plugin]
         unregisterCommands.push(
             registerCommand({
                 name: "plugin-uninstall",
@@ -111,60 +129,33 @@ export default {
                 description: "Uninstall an installed plugin",
                 options: [
                     {
-                        name: "name",
-                        displayName: "name",
-                        description: "Name or URL of the plugin to uninstall (leave blank to search)",
+                        name: "plugin",
+                        displayName: "plugin",
+                        description: "Select a plugin to uninstall",
                         type: 3, // STRING
-                        required: false,
+                        required: true,
+                        autocomplete: true,
                     },
                 ],
-                execute: async (args, ctx) => {
-                    const input = args[0]?.value?.trim().toLowerCase();
-                    const allPlugins = getPluginList();
+                onAutoComplete: (args) => {
+                    const focused = args.find((opt: any) => opt.focused);
+                    return buildAutocompleteChoices(focused?.value);
+                },
+                execute: async (args) => {
+                    const targetId = args[0]?.value?.trim();
+                    if (!targetId || targetId === "none") return;
 
-                    if (allPlugins.length === 0) {
-                        Clyde?.sendBotMessage(ctx.channel.id, "No plugins are currently installed.");
-                        return;
+                    try {
+                        await removePlugin(targetId);
+                        showToast("Plugin uninstalled", undefined);
+                    } catch (err: any) {
+                        showToast(`Failed: ${err?.message || err}`, undefined);
                     }
-
-                    // Direct match if query provided
-                    if (input) {
-                        const target = allPlugins.find(
-                            (p) =>
-                                p.id.toLowerCase() === input ||
-                                p.manifest?.name?.toLowerCase().includes(input)
-                        );
-
-                        if (!target) {
-                            showToast("Plugin not found", undefined);
-                            return;
-                        }
-
-                        try {
-                            await removePlugin(target.id);
-                            showToast(`Uninstalled ${target.manifest?.name || "plugin"}`, undefined);
-                        } catch (err: any) {
-                            showToast(`Failed: ${err?.message || err}`, undefined);
-                        }
-                        return;
-                    }
-
-                    // If no query, print clean interactive list to channel
-                    const listLines = [
-                        "**Installed Plugins (Copy ID to uninstall):**\n",
-                        ...allPlugins.map((p) => {
-                            const name = p.manifest?.name || "Unknown";
-                            const status = p.enabled ? "✅" : "❌";
-                            return `> ${status} **${name}** — \`${p.id}\``;
-                        }),
-                    ];
-
-                    Clyde?.sendBotMessage(ctx.channel.id, listLines.join("\n"));
                 },
             })
         );
 
-        // 3. /plugin-settings
+        // 3. /plugin-settings [plugin]
         unregisterCommands.push(
             registerCommand({
                 name: "plugin-settings",
@@ -172,48 +163,21 @@ export default {
                 description: "Open settings for an installed plugin",
                 options: [
                     {
-                        name: "name",
-                        displayName: "name",
-                        description: "Plugin name or URL (leave blank to show list)",
+                        name: "plugin",
+                        displayName: "plugin",
+                        description: "Select a plugin to configure",
                         type: 3, // STRING
-                        required: false,
+                        required: true,
+                        autocomplete: true,
                     },
                 ],
-                execute: (args, ctx) => {
-                    const input = args[0]?.value?.trim().toLowerCase();
-                    const allPlugins = getPluginList();
-
-                    if (allPlugins.length === 0) {
-                        Clyde?.sendBotMessage(ctx.channel.id, "No plugins installed.");
-                        return;
-                    }
-
-                    if (input) {
-                        const target = allPlugins.find(
-                            (p) =>
-                                p.id.toLowerCase() === input ||
-                                p.manifest?.name?.toLowerCase().includes(input)
-                        );
-
-                        if (!target) {
-                            showToast("Plugin not found", undefined);
-                            return;
-                        }
-
-                        openSettingsForPlugin(target.id, target.manifest?.name || "Plugin Settings");
-                        return;
-                    }
-
-                    // Print quick settings menu choices to Clyde
-                    const listLines = [
-                        "**Plugins with Settings Pages:**\n",
-                        ...allPlugins.map((p) => {
-                            const name = p.manifest?.name || "Unknown";
-                            return `> **${name}**: Type \`/plugin-settings ${name}\``;
-                        }),
-                    ];
-
-                    Clyde?.sendBotMessage(ctx.channel.id, listLines.join("\n"));
+                onAutoComplete: (args) => {
+                    const focused = args.find((opt: any) => opt.focused);
+                    return buildAutocompleteChoices(focused?.value);
+                },
+                execute: (args) => {
+                    const targetId = args[0]?.value?.trim();
+                    openPluginSettings(targetId);
                 },
             })
         );
