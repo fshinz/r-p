@@ -3,21 +3,17 @@ import { installPlugin, removePlugin, plugins, getSettings } from "@vendetta/plu
 import { findByProps } from "@vendetta/metro";
 import { showToast } from "@vendetta/ui/toasts";
 import { React, NavigationNative } from "@vendetta/metro/common";
-import { Forms } from "@vendetta/ui/components";
 
 let unregisterCommands: Array<() => void> = [];
 
-// Locate the app's actual navigation stack dispatcher (pushPage / push)
-const router = 
-    findByProps("pushPage", "popPage") || 
-    findByProps("push", "pop", "openLazy") ||
-    findByProps("push", "popToTop");
+// 1. Resolve Navigation Dispatchers from Metro
+const NavigationRouter = 
+    findByProps("push", "pop", "popToTop") || 
+    findByProps("push", "pop") ||
+    findByProps("pushLazy");
 
-// Locate the screen wrapper components
-const Navigator = findByProps("Navigator")?.Navigator;
-const modalCloseButton =
-    findByProps("getRenderCloseButton")?.getRenderCloseButton ??
-    findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
+// 2. Fallback to openScreen or standard UI routers
+const openScreen = findByProps("openScreen")?.openScreen;
 
 // Helper to find plugin ID by matching input string against URL or Manifest Name
 function findPluginId(query: string): string | null {
@@ -52,50 +48,28 @@ function openPluginSettings(pluginId: string) {
 
         const title = plugin.manifest?.name || "Plugin Settings";
 
-        // Strategy 1: Modern pushPage dispatcher (ShiggyCord / standard client routes)
-        if (typeof router?.pushPage === "function") {
-            router.pushPage(() => <SettingsComponent />, { title });
+        // Strategy 1: openScreen helper (standard in modern client builds)
+        if (typeof openScreen === "function") {
+            openScreen("WidgetSettings", {
+                title,
+                render: () => <SettingsComponent />,
+            });
             return;
         }
 
-        // Strategy 2: Legacy push with Navigator wrapper
-        if (typeof router?.push === "function" && Navigator) {
-            router.push(() => (
-                <Navigator
-                    initialRouteName="PluginSettingsView"
-                    goBackOnBackPress
-                    screens={{
-                        PluginSettingsView: {
-                            title,
-                            headerLeft: modalCloseButton?.(() => {
-                                if (typeof router?.pop === "function") router.pop();
-                            }),
-                            render: () => {
-                                try {
-                                    return <SettingsComponent />;
-                                } catch (renderErr: any) {
-                                    console.error("[PluginCommands] Render error inside settings:", renderErr);
-                                    showToast(`Render error: ${renderErr?.message || renderErr}`, undefined);
-                                    return null;
-                                }
-                            },
-                        },
-                    }}
-                />
-            ));
+        // Strategy 2: Direct push via standard NavigationRouter module
+        if (typeof NavigationRouter?.push === "function") {
+            NavigationRouter.push(SettingsComponent, { title });
             return;
         }
 
-        // Strategy 3: Standard NavigationNative action dispatch fallback
-        if (NavigationNative?.useNavigation) {
-            showToast("Opening settings via screen stack...", undefined);
-            if (typeof router?.push === "function") {
-                router.push(SettingsComponent);
-                return;
-            }
+        // Strategy 3: Push screen function passed from React Navigation context
+        if (typeof NavigationNative?.push === "function") {
+            NavigationNative.push(SettingsComponent);
+            return;
         }
 
-        showToast("Error: Could not locate a valid page router", undefined);
+        showToast("Error: Navigation module could not be mounted", undefined);
     } catch (err: any) {
         console.error("[PluginCommands] Exception caught in openPluginSettings:", err);
         showToast(`Fatal: ${err?.message || String(err)}`, undefined);
