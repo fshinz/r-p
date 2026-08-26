@@ -1,39 +1,39 @@
 import { registerCommand } from "@vendetta/commands";
 import { installPlugin, removePlugin, plugins, getSettings } from "@vendetta/plugins";
-import { findByProps, findByName } from "@vendetta/metro";
+import { findByProps } from "@vendetta/metro";
 import { showToast } from "@vendetta/ui/toasts";
-import { React } from "@vendetta/metro/common";
+import { React, NavigationNative } from "@vendetta/metro/common";
+import { Forms } from "@vendetta/ui/components";
 
 let unregisterCommands: Array<() => void> = [];
 
-const Navigation = findByProps("push", "pop");
-const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
+// 1. Target unique React Navigation router methods (avoids UIManager collision)
+const Navigation = findByProps("push", "replace", "popToTop") || findByProps("push", "goBack");
+
+// 2. Fetch the Navigator and header close button correctly
+const Navigator = findByProps("Navigator")?.Navigator;
 const modalCloseButton =
-  findByProps("getRenderCloseButton")?.getRenderCloseButton ??
-  findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
+    findByProps("getRenderCloseButton")?.getRenderCloseButton ??
+    findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
 
 // Helper to find plugin ID by matching input string against URL or Manifest Name
 function findPluginId(query: string): string | null {
     const q = query.trim().toLowerCase();
 
-    return Object.keys(plugins).find((id) => {
-        const p = plugins[id];
-        const name = p?.manifest?.name?.toLowerCase() || "";
-        const url = id.toLowerCase();
+    return (
+        Object.keys(plugins).find((id) => {
+            const p = plugins[id];
+            const name = p?.manifest?.name?.toLowerCase() || "";
+            const url = id.toLowerCase();
 
-        return (
-            url === q ||
-            name === q ||
-            url.includes(q) ||
-            name.includes(q)
-        );
-    }) || null;
+            return url === q || name === q || url.includes(q) || name.includes(q);
+        }) || null
+    );
 }
 
-// Opens the plugin's exported settings screen with diagnostic logging
+// Opens the plugin's exported settings screen safely
 function openPluginSettings(pluginId: string) {
     console.log("[PluginCommands] Starting openPluginSettings for ID:", pluginId);
-    showToast(`[Debug 1/4] Targeted ID: ${pluginId.slice(0, 25)}...`, undefined);
 
     const plugin = plugins[pluginId] as any;
     if (!plugin) {
@@ -42,68 +42,48 @@ function openPluginSettings(pluginId: string) {
     }
 
     try {
-        console.log("[PluginCommands] Plugin Manifest:", plugin.manifest);
-        
-        if (typeof getSettings !== "function") {
-            showToast("Error: getSettings is not a function", undefined);
-            console.error("[PluginCommands] getSettings import is invalid:", getSettings);
-            return;
-        }
-
         const SettingsComponent = getSettings(pluginId);
         console.log("[PluginCommands] getSettings output:", SettingsComponent);
 
         if (!SettingsComponent) {
-            showToast("Error: getSettings returned null/undefined", undefined);
+            showToast("Plugin has no settings page", undefined);
             return;
         }
-
-        showToast(`[Debug 2/4] Component found: ${typeof SettingsComponent}`, undefined);
-
-        console.log("[PluginCommands] Navigation module:", Navigation);
-        console.log("[PluginCommands] Navigator module:", Navigator);
 
         if (!Navigation?.push) {
-            showToast("Error: Navigation.push is missing", undefined);
+            showToast("Error: Navigation router missing", undefined);
             return;
         }
 
-        if (!Navigator) {
-            showToast("Error: Navigator component is missing", undefined);
-            return;
-        }
-
-        showToast("[Debug 3/4] Executing Navigation.push...", undefined);
-
-        // Attempting screen push via JSX
-        Navigation.push(() => (
-            <Navigator
-                initialRouteName="PluginSettingsView"
-                goBackOnBackPress
-                screens={{
-                    PluginSettingsView: {
-                        title: plugin.manifest?.name || "Plugin Settings",
-                        headerLeft: modalCloseButton?.(() => {
-                            console.log("[PluginCommands] Close button pressed");
-                            Navigation.pop();
-                        }),
-                        render: () => {
-                            console.log("[PluginCommands] Rendering SettingsComponent inside screen...");
-                            try {
-                                return <SettingsComponent />;
-                            } catch (renderErr: any) {
-                                console.error("[PluginCommands] Render error inside settings:", renderErr);
-                                showToast(`Render error: ${renderErr?.message || renderErr}`, undefined);
-                                return null;
-                            }
+        // Fallback: If custom Navigator wrapper fails, push directly via standard navigation tree
+        if (Navigator) {
+            Navigation.push(() => (
+                <Navigator
+                    initialRouteName="PluginSettingsView"
+                    goBackOnBackPress
+                    screens={{
+                        PluginSettingsView: {
+                            title: plugin.manifest?.name || "Plugin Settings",
+                            headerLeft: modalCloseButton?.(() => Navigation.pop()),
+                            render: () => {
+                                try {
+                                    return <SettingsComponent />;
+                                } catch (renderErr: any) {
+                                    console.error("[PluginCommands] Render error inside settings:", renderErr);
+                                    showToast(`Render error: ${renderErr?.message || renderErr}`, undefined);
+                                    return null;
+                                }
+                            },
                         },
-                    },
-                }}
-            />
-        ));
-
-        showToast("[Debug 4/4] Navigation.push call completed", undefined);
-
+                    }}
+                />
+            ));
+        } else {
+            // Direct push fallback using React Navigation container
+            Navigation.push(SettingsComponent, {
+                title: plugin.manifest?.name || "Plugin Settings",
+            });
+        }
     } catch (err: any) {
         console.error("[PluginCommands] Exception caught in openPluginSettings:", err);
         showToast(`Fatal: ${err?.message || String(err)}`, undefined);
