@@ -1,17 +1,21 @@
 import { registerCommand } from "@vendetta/commands";
 import { installPlugin, removePlugin, plugins, getSettings } from "@vendetta/plugins";
-import { findByProps } from "@vendetta/metro";
+import { findByProps, findByName } from "@vendetta/metro";
 import { showToast } from "@vendetta/ui/toasts";
 import { React } from "@vendetta/metro/common";
 
 let unregisterCommands: Array<() => void> = [];
 
 const Navigation = findByProps("push", "pop");
+const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
+const modalCloseButton =
+  findByProps("getRenderCloseButton")?.getRenderCloseButton ??
+  findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
 
 // Helper to find plugin ID by matching input string against URL or Manifest Name
 function findPluginId(query: string): string | null {
     const q = query.trim().toLowerCase();
-    
+
     return Object.keys(plugins).find((id) => {
         const p = plugins[id];
         const name = p?.manifest?.name?.toLowerCase() || "";
@@ -26,7 +30,7 @@ function findPluginId(query: string): string | null {
     }) || null;
 }
 
-// Opens the plugin's exported settings screen
+// Opens the plugin's exported settings screen in a Navigator screen stack
 function openPluginSettings(pluginId: string) {
     const plugin = plugins[pluginId] as any;
 
@@ -43,14 +47,24 @@ function openPluginSettings(pluginId: string) {
             return;
         }
 
-        if (Navigation?.push) {
-            Navigation.push("VendettaCustomPage", {
-                title: plugin.manifest?.name || "Plugin Settings",
-                render: () => React.createElement(SettingsComponent),
-            });
-        } else {
+        if (!Navigator || !Navigation?.push) {
             showToast("Navigation router not available", undefined);
+            return;
         }
+
+        Navigation.push(() => (
+            <Navigator
+                initialRouteName="PluginSettingsView"
+                goBackOnBackPress
+                screens={{
+                    PluginSettingsView: {
+                        title: plugin.manifest?.name || "Plugin Settings",
+                        headerLeft: modalCloseButton?.(() => Navigation.pop()),
+                        render: () => <SettingsComponent />,
+                    },
+                }}
+            />
+        ));
     } catch (err: any) {
         showToast(`Failed to open settings: ${err?.message || err}`, undefined);
     }
