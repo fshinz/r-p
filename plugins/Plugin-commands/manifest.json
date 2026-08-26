@@ -7,6 +7,6 @@
       "id": "0"
     }
   ],
-  "main": "src/index.ts",
+  "main": "src/index.tsx",
   "version": "1.0.0"
 }
