@@ -13,24 +13,46 @@ const modalCloseButton =
     findByProps("getRenderCloseButton")?.getRenderCloseButton ??
     findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
 
-// Safely unwraps the reactive store into standard plugin objects
-function getPluginsMap(): Record<string, any> {
-    // Check internal store property if available, otherwise clone proxy
-    const rawPlugins = (plugins as any)?.plugins || plugins || {};
-    try {
-        return typeof rawPlugins === "object" ? { ...rawPlugins } : {};
-    } catch {
-        return {};
-    }
+// Direct store resolver checking global client spaces (Vendetta, Bunny, Revenge)
+function getRawPluginsStore(): Record<string, any> {
+    const w = window as any;
+    return (
+        w.vendetta?.plugins?.plugins ||
+        w.bunny?.plugins?.plugins ||
+        w.revenge?.plugins?.plugins ||
+        (plugins as any)?.plugins ||
+        plugins ||
+        {}
+    );
 }
 
-// Returns an array of formatted choices for the autocomplete dropdown menu
+// Find key/ID by matching given query string against object keys or manifest names
+function resolvePluginKey(query: string): string | null {
+    if (!query || query === "none") return null;
+    const store = getRawPluginsStore();
+    const q = query.trim().toLowerCase();
+
+    // 1. Exact match by ID key
+    if (store[query]) return query;
+
+    // 2. Exact match by lowercase key or manifest name
+    const foundKey = Object.keys(store).find((id) => {
+        const p = store[id];
+        const name = p?.manifest?.name?.toLowerCase() || "";
+        const key = id.toLowerCase();
+        return key === q || name === q || key.includes(q) || name.includes(q);
+    });
+
+    return foundKey || null;
+}
+
+// Returns formatted choices for autocomplete dropdown menu
 function getPluginAutocompleteChoices(input: string) {
     const query = input.toLowerCase().trim();
-    const pluginMap = getPluginsMap();
-    const pluginIds = Object.keys(pluginMap);
+    const store = getRawPluginsStore();
+    const keys = Object.keys(store);
 
-    if (pluginIds.length === 0) {
+    if (keys.length === 0) {
         return [
             {
                 name: "No installed plugins found",
@@ -40,32 +62,33 @@ function getPluginAutocompleteChoices(input: string) {
         ];
     }
 
-    return pluginIds
+    return keys
         .map((id) => {
-            const plugin = pluginMap[id];
+            const plugin = store[id];
             const name = plugin?.manifest?.name || id;
             return {
                 name: name,
                 displayName: name,
-                value: id,
+                value: id, // Pass raw store key
             };
         })
-        .filter((choice) => choice.name.toLowerCase().includes(query))
+        .filter((choice) => choice.name.toLowerCase().includes(query) || choice.value.toLowerCase().includes(query))
         .slice(0, 25);
 }
 
-// Opens the plugin settings page using the working Modal implementation
-function openPluginSettings(pluginId: string) {
-    const pluginMap = getPluginsMap();
-    const plugin = pluginMap[pluginId];
-
-    if (!plugin) {
+// Opens the plugin settings page using Modal implementation
+function openPluginSettings(query: string) {
+    const targetKey = resolvePluginKey(query);
+    if (!targetKey) {
         showToast("Error: Plugin object not found in store", undefined);
         return;
     }
 
+    const store = getRawPluginsStore();
+    const plugin = store[targetKey];
+
     try {
-        const SettingsComponent = getSettings(pluginId);
+        const SettingsComponent = getSettings(targetKey);
 
         if (!SettingsComponent) {
             showToast("Plugin has no settings page", undefined);
@@ -77,7 +100,7 @@ function openPluginSettings(pluginId: string) {
             return;
         }
 
-        const title = plugin.manifest?.name || "Plugin Settings";
+        const title = plugin?.manifest?.name || "Plugin Settings";
 
         Navigation.push(() =>
             React.createElement(Navigator, {
@@ -161,11 +184,17 @@ export default {
                     return getPluginAutocompleteChoices(input);
                 },
                 execute: async (args) => {
-                    const targetId = args[0]?.value?.trim();
-                    if (!targetId || targetId === "none") return;
+                    const query = args[0]?.value?.trim();
+                    if (!query || query === "none") return;
+
+                    const targetKey = resolvePluginKey(query);
+                    if (!targetKey) {
+                        showToast("Plugin not found in store", undefined);
+                        return;
+                    }
 
                     try {
-                        await removePlugin(targetId);
+                        await removePlugin(targetKey);
                         showToast("Plugin uninstalled", undefined);
                     } catch (err: any) {
                         showToast(`Failed to uninstall: ${err?.message || err}`, undefined);
@@ -196,10 +225,10 @@ export default {
                     return getPluginAutocompleteChoices(input);
                 },
                 execute: (args) => {
-                    const targetId = args[0]?.value?.trim();
-                    if (!targetId || targetId === "none") return;
+                    const query = args[0]?.value?.trim();
+                    if (!query || query === "none") return;
 
-                    openPluginSettings(targetId);
+                    openPluginSettings(query);
                 },
             })
         );
