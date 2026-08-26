@@ -3,17 +3,17 @@ import { installPlugin, removePlugin, plugins, getSettings } from "@vendetta/plu
 import { findByProps } from "@vendetta/metro";
 import { showToast } from "@vendetta/ui/toasts";
 import { React, NavigationNative } from "@vendetta/metro/common";
+import { Forms } from "@vendetta/ui/components";
 
 let unregisterCommands: Array<() => void> = [];
 
-// 1. Resolve Navigation Router safely across different client/patcher versions
-const Navigation = 
-    NavigationNative?.navigation || 
-    findByProps("push", "popToTop") || 
-    findByProps("push", "replace") ||
-    findByProps("push", "goBack");
+// Locate the app's actual navigation stack dispatcher (pushPage / push)
+const router = 
+    findByProps("pushPage", "popPage") || 
+    findByProps("push", "pop", "openLazy") ||
+    findByProps("push", "popToTop");
 
-// 2. Resolve Navigator and Header Close Button
+// Locate the screen wrapper components
 const Navigator = findByProps("Navigator")?.Navigator;
 const modalCloseButton =
     findByProps("getRenderCloseButton")?.getRenderCloseButton ??
@@ -50,26 +50,25 @@ function openPluginSettings(pluginId: string) {
             return;
         }
 
-        // Alternative push mechanism if the top-level push function isn't found
-        const pushFunc = Navigation?.push || NavigationNative?.push;
+        const title = plugin.manifest?.name || "Plugin Settings";
 
-        if (typeof pushFunc !== "function") {
-            showToast("Error: Navigation router missing", undefined);
-            console.error("[PluginCommands] Navigation dumps:", { Navigation, NavigationNative });
+        // Strategy 1: Modern pushPage dispatcher (ShiggyCord / standard client routes)
+        if (typeof router?.pushPage === "function") {
+            router.pushPage(() => <SettingsComponent />, { title });
             return;
         }
 
-        if (Navigator) {
-            pushFunc(() => (
+        // Strategy 2: Legacy push with Navigator wrapper
+        if (typeof router?.push === "function" && Navigator) {
+            router.push(() => (
                 <Navigator
                     initialRouteName="PluginSettingsView"
                     goBackOnBackPress
                     screens={{
                         PluginSettingsView: {
-                            title: plugin.manifest?.name || "Plugin Settings",
+                            title,
                             headerLeft: modalCloseButton?.(() => {
-                                const popFunc = Navigation?.pop || NavigationNative?.pop || Navigation?.goBack;
-                                if (typeof popFunc === "function") popFunc();
+                                if (typeof router?.pop === "function") router.pop();
                             }),
                             render: () => {
                                 try {
@@ -84,12 +83,19 @@ function openPluginSettings(pluginId: string) {
                     }}
                 />
             ));
-        } else {
-            // Direct push fallback using SettingsComponent
-            pushFunc(SettingsComponent, {
-                title: plugin.manifest?.name || "Plugin Settings",
-            });
+            return;
         }
+
+        // Strategy 3: Standard NavigationNative action dispatch fallback
+        if (NavigationNative?.useNavigation) {
+            showToast("Opening settings via screen stack...", undefined);
+            if (typeof router?.push === "function") {
+                router.push(SettingsComponent);
+                return;
+            }
+        }
+
+        showToast("Error: Could not locate a valid page router", undefined);
     } catch (err: any) {
         console.error("[PluginCommands] Exception caught in openPluginSettings:", err);
         showToast(`Fatal: ${err?.message || String(err)}`, undefined);
