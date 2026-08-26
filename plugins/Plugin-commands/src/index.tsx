@@ -13,58 +13,100 @@ const modalCloseButton =
     findByProps("getRenderCloseButton")?.getRenderCloseButton ??
     findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
 
-// Helper to reliably format choices for Discord's autocomplete popup
-function buildAutocompleteChoices(query: string) {
-    const q = (query || "").toLowerCase().trim();
+// Safely pull option input from raw auto-complete arguments
+function getFocusedInputValue(args: any): string {
+    if (!args) return "";
     
+    // Check array or object payload formats passed by mobile patchers
+    const options = Array.isArray(args) ? args : args.options || [];
+    const focusedOpt = options.find((opt: any) => opt.focused) || options[0];
+    
+    return typeof focusedOpt?.value === "string" ? focusedOpt.value : "";
+}
+
+// Generate autocomplete items using identical store extraction from your list script
+function getPluginChoices(query: string) {
     if (!plugins || typeof plugins !== "object") {
-        return [{ name: "No plugins loaded", value: "none" }];
+        return [{ name: "No plugins available", value: "none" }];
     }
 
-    const entries = Object.entries(plugins);
+    const q = query.toLowerCase().trim();
+    const pluginEntries = Object.entries(plugins);
 
-    if (entries.length === 0) {
+    if (pluginEntries.length === 0) {
         return [{ name: "No plugins installed", value: "none" }];
     }
 
-    const matches = entries
-        .map(([id, plugin]: [string, any]) => {
-            const name = plugin?.manifest?.name || id;
-            return {
-                name: `${plugin?.enabled ? "✅" : "❌"} ${name}`,
-                value: id, // Store the raw plugin ID/URL
-                searchKey: name.toLowerCase(),
-            };
-        })
-        .filter((choice) => choice.searchKey.includes(q) || choice.value.toLowerCase().includes(q))
-        .slice(0, 25);
+    const choices: Array<{ name: string; value: string }> = [];
 
-    if (matches.length === 0) {
+    for (const [id, plugin] of pluginEntries) {
+        if (!plugin || typeof plugin !== "object") continue;
+
+        // Use plugin.id or key ID directly
+        const pluginId = plugin.id || id;
+        const name = plugin.manifest?.name || "Unknown Plugin";
+        const status = plugin.enabled ? "✅" : "❌";
+        
+        const displayName = `${status} ${name}`;
+
+        // Filter based on input query
+        if (!q || name.toLowerCase().includes(q) || pluginId.toLowerCase().includes(q)) {
+            choices.push({
+                name: displayName,
+                value: pluginId, // Exact store key
+            });
+        }
+    }
+
+    if (choices.length === 0) {
         return [{ name: "No matching plugins found", value: "none" }];
     }
 
-    return matches.map(({ name, value }) => ({ name, value }));
+    return choices.slice(0, 25);
 }
 
-// Open settings page for selected plugin
-function openPluginSettings(pluginId: string) {
-    if (!pluginId || pluginId === "none") return;
+// Resolve plugin object securely from store during command execution
+function findPluginInStore(keyOrUrl: string) {
+    if (!keyOrUrl || keyOrUrl === "none" || !plugins) return null;
 
-    const plugin = (plugins as Record<string, any>)[pluginId];
-    if (!plugin) {
-        showToast("Plugin not found in store", undefined);
+    // Direct key lookup
+    if (plugins[keyOrUrl]) {
+        return { id: keyOrUrl, instance: plugins[keyOrUrl] };
+    }
+
+    // Match by plugin.id property or manifest name fallback
+    const match = Object.entries(plugins).find(([id, p]: [string, any]) => {
+        return (
+            id === keyOrUrl ||
+            p?.id === keyOrUrl ||
+            p?.manifest?.name?.toLowerCase() === keyOrUrl.toLowerCase()
+        );
+    });
+
+    return match ? { id: match[0], instance: match[1] } : null;
+}
+
+// Open settings modal safely on submit
+function openPluginSettings(targetKey: string) {
+    const matched = findPluginInStore(targetKey);
+
+    if (!matched) {
+        showToast("Error: Plugin object not found in store", undefined);
         return;
     }
 
+    const { id: pluginId, instance: plugin } = matched;
+
     try {
         const SettingsComponent = getSettings(pluginId);
+
         if (!SettingsComponent) {
             showToast(`${plugin?.manifest?.name || "Plugin"} has no settings page`, undefined);
             return;
         }
 
         if (!Navigation || !Navigator) {
-            showToast("Navigation modules missing", undefined);
+            showToast("Error: Navigation stack modules not found", undefined);
             return;
         }
 
@@ -79,13 +121,22 @@ function openPluginSettings(pluginId: string) {
                         headerLeft: modalCloseButton?.(() => {
                             if (typeof Navigation?.pop === "function") Navigation.pop();
                         }),
-                        render: () => React.createElement(SettingsComponent),
+                        render: () => {
+                            try {
+                                return React.createElement(SettingsComponent);
+                            } catch (renderErr: any) {
+                                console.error("[PluginSettings] Render error:", renderErr);
+                                showToast(`Render error: ${renderErr?.message || renderErr}`, undefined);
+                                return null;
+                            }
+                        },
                     },
                 },
             })
         );
     } catch (err: any) {
-        showToast(`Error opening settings: ${err?.message || err}`, undefined);
+        console.error("[PluginSettings] Exception:", err);
+        showToast(`Fatal: ${err?.message || String(err)}`, undefined);
     }
 }
 
@@ -131,25 +182,31 @@ export default {
                     {
                         name: "plugin",
                         displayName: "plugin",
-                        description: "Select a plugin to uninstall",
+                        description: "Select an installed plugin to uninstall",
                         type: 3, // STRING
                         required: true,
                         autocomplete: true,
                     },
                 ],
                 onAutoComplete: (args) => {
-                    const focused = args.find((opt: any) => opt.focused);
-                    return buildAutocompleteChoices(focused?.value);
+                    const inputValue = getFocusedInputValue(args);
+                    return getPluginChoices(inputValue);
                 },
                 execute: async (args) => {
-                    const targetId = args[0]?.value?.trim();
-                    if (!targetId || targetId === "none") return;
+                    const query = args[0]?.value?.trim();
+                    if (!query || query === "none") return;
+
+                    const matched = findPluginInStore(query);
+                    if (!matched) {
+                        showToast("Error: Plugin object not found in store", undefined);
+                        return;
+                    }
 
                     try {
-                        await removePlugin(targetId);
+                        await removePlugin(matched.id);
                         showToast("Plugin uninstalled", undefined);
                     } catch (err: any) {
-                        showToast(`Failed: ${err?.message || err}`, undefined);
+                        showToast(`Failed to uninstall: ${err?.message || err}`, undefined);
                     }
                 },
             })
@@ -165,19 +222,21 @@ export default {
                     {
                         name: "plugin",
                         displayName: "plugin",
-                        description: "Select a plugin to configure",
+                        description: "Select an installed plugin",
                         type: 3, // STRING
                         required: true,
                         autocomplete: true,
                     },
                 ],
                 onAutoComplete: (args) => {
-                    const focused = args.find((opt: any) => opt.focused);
-                    return buildAutocompleteChoices(focused?.value);
+                    const inputValue = getFocusedInputValue(args);
+                    return getPluginChoices(inputValue);
                 },
                 execute: (args) => {
-                    const targetId = args[0]?.value?.trim();
-                    openPluginSettings(targetId);
+                    const query = args[0]?.value?.trim();
+                    if (!query || query === "none") return;
+
+                    openPluginSettings(query);
                 },
             })
         );
