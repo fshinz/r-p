@@ -6,26 +6,29 @@ import { React } from "@vendetta/metro/common";
 
 let unregisterCommands: Array<() => void> = [];
 
-// 1. Resolve Navigation modules matching your working modal snippet
+// 1. Resolve Navigation modules
 const Navigation = findByProps("push", "pushLazy", "pop");
 const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
 const modalCloseButton =
     findByProps("getRenderCloseButton")?.getRenderCloseButton ??
     findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
 
-// Helper to find plugin ID by matching input string against URL or Manifest Name
-function findPluginId(query: string): string | null {
-    const q = query.trim().toLowerCase();
+// Returns an array of formatted choices for the autocomplete dropdown menu
+function getPluginAutocompleteChoices(input: string) {
+    const query = input.toLowerCase().trim();
 
-    return (
-        Object.keys(plugins).find((id) => {
-            const p = plugins[id];
-            const name = p?.manifest?.name?.toLowerCase() || "";
-            const url = id.toLowerCase();
-
-            return url === q || name === q || url.includes(q) || name.includes(q);
-        }) || null
-    );
+    return Object.keys(plugins)
+        .map((id) => {
+            const plugin = plugins[id];
+            const name = plugin?.manifest?.name || id;
+            return {
+                name: name, // Label shown in the menu
+                displayName: name,
+                value: id,   // Exact ID passed to execute handler
+            };
+        })
+        .filter((choice) => choice.name.toLowerCase().includes(query))
+        .slice(0, 25); // Discord supports up to 25 autocomplete items
 }
 
 // Opens the plugin settings page using the working Modal implementation
@@ -51,7 +54,6 @@ function openPluginSettings(pluginId: string) {
 
         const title = plugin.manifest?.name || "Plugin Settings";
 
-        // Push using pure React.createElement to prevent React element/JSX bundle mismatch
         Navigation.push(() =>
             React.createElement(Navigator, {
                 initialRouteName: "PluginSettingsModal",
@@ -117,23 +119,27 @@ export default {
             registerCommand({
                 name: "plugin-uninstall",
                 displayName: "plugin-uninstall",
-                description: "Uninstall an installed plugin by name or URL",
+                description: "Uninstall an installed plugin",
                 options: [
                     {
                         name: "plugin",
                         displayName: "plugin",
-                        description: "Plugin Name or URL",
+                        description: "Select an installed plugin to uninstall",
                         type: 3, // STRING
                         required: true,
+                        autocomplete: true,
                     },
                 ],
+                onAutoComplete: (args) => {
+                    const focusedOption = args.find((opt: any) => opt.focused);
+                    const input = focusedOption?.value || "";
+                    return getPluginAutocompleteChoices(input);
+                },
                 execute: async (args) => {
-                    const query = args[0]?.value?.trim();
-                    if (!query) return;
+                    const targetId = args[0]?.value?.trim();
+                    if (!targetId) return;
 
-                    const targetId = findPluginId(query);
-
-                    if (targetId) {
+                    if (plugins[targetId]) {
                         try {
                             await removePlugin(targetId);
                             showToast("Plugin uninstalled", undefined);
@@ -157,21 +163,25 @@ export default {
                     {
                         name: "plugin",
                         displayName: "plugin",
-                        description: "Plugin Name or URL",
+                        description: "Select an installed plugin",
                         type: 3, // STRING
                         required: true,
+                        autocomplete: true,
                     },
                 ],
+                onAutoComplete: (args) => {
+                    const focusedOption = args.find((opt: any) => opt.focused);
+                    const input = focusedOption?.value || "";
+                    return getPluginAutocompleteChoices(input);
+                },
                 execute: (args) => {
-                    const query = args[0]?.value?.trim();
-                    if (!query) return;
+                    const targetId = args[0]?.value?.trim();
+                    if (!targetId) return;
 
-                    const targetId = findPluginId(query);
-
-                    if (targetId) {
+                    if (plugins[targetId]) {
                         openPluginSettings(targetId);
                     } else {
-                        showToast("No installed plugin matched that name/URL", undefined);
+                        showToast("Selected plugin is not installed", undefined);
                     }
                 },
             })
