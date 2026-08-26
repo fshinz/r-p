@@ -3,14 +3,17 @@ import { installPlugin, removePlugin, plugins, getSettings } from "@vendetta/plu
 import { findByProps } from "@vendetta/metro";
 import { showToast } from "@vendetta/ui/toasts";
 import { React, NavigationNative } from "@vendetta/metro/common";
-import { Forms } from "@vendetta/ui/components";
 
 let unregisterCommands: Array<() => void> = [];
 
-// 1. Target unique React Navigation router methods (avoids UIManager collision)
-const Navigation = findByProps("push", "replace", "popToTop") || findByProps("push", "goBack");
+// 1. Resolve Navigation Router safely across different client/patcher versions
+const Navigation = 
+    NavigationNative?.navigation || 
+    findByProps("push", "popToTop") || 
+    findByProps("push", "replace") ||
+    findByProps("push", "goBack");
 
-// 2. Fetch the Navigator and header close button correctly
+// 2. Resolve Navigator and Header Close Button
 const Navigator = findByProps("Navigator")?.Navigator;
 const modalCloseButton =
     findByProps("getRenderCloseButton")?.getRenderCloseButton ??
@@ -33,8 +36,6 @@ function findPluginId(query: string): string | null {
 
 // Opens the plugin's exported settings screen safely
 function openPluginSettings(pluginId: string) {
-    console.log("[PluginCommands] Starting openPluginSettings for ID:", pluginId);
-
     const plugin = plugins[pluginId] as any;
     if (!plugin) {
         showToast("Error: Plugin object not found in store", undefined);
@@ -43,28 +44,33 @@ function openPluginSettings(pluginId: string) {
 
     try {
         const SettingsComponent = getSettings(pluginId);
-        console.log("[PluginCommands] getSettings output:", SettingsComponent);
 
         if (!SettingsComponent) {
             showToast("Plugin has no settings page", undefined);
             return;
         }
 
-        if (!Navigation?.push) {
+        // Alternative push mechanism if the top-level push function isn't found
+        const pushFunc = Navigation?.push || NavigationNative?.push;
+
+        if (typeof pushFunc !== "function") {
             showToast("Error: Navigation router missing", undefined);
+            console.error("[PluginCommands] Navigation dumps:", { Navigation, NavigationNative });
             return;
         }
 
-        // Fallback: If custom Navigator wrapper fails, push directly via standard navigation tree
         if (Navigator) {
-            Navigation.push(() => (
+            pushFunc(() => (
                 <Navigator
                     initialRouteName="PluginSettingsView"
                     goBackOnBackPress
                     screens={{
                         PluginSettingsView: {
                             title: plugin.manifest?.name || "Plugin Settings",
-                            headerLeft: modalCloseButton?.(() => Navigation.pop()),
+                            headerLeft: modalCloseButton?.(() => {
+                                const popFunc = Navigation?.pop || NavigationNative?.pop || Navigation?.goBack;
+                                if (typeof popFunc === "function") popFunc();
+                            }),
                             render: () => {
                                 try {
                                     return <SettingsComponent />;
@@ -79,8 +85,8 @@ function openPluginSettings(pluginId: string) {
                 />
             ));
         } else {
-            // Direct push fallback using React Navigation container
-            Navigation.push(SettingsComponent, {
+            // Direct push fallback using SettingsComponent
+            pushFunc(SettingsComponent, {
                 title: plugin.manifest?.name || "Plugin Settings",
             });
         }
