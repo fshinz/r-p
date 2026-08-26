@@ -30,28 +30,52 @@ function findPluginId(query: string): string | null {
     }) || null;
 }
 
-// Opens the plugin's exported settings screen in a Navigator screen stack
+// Opens the plugin's exported settings screen with diagnostic logging
 function openPluginSettings(pluginId: string) {
-    const plugin = plugins[pluginId] as any;
+    console.log("[PluginCommands] Starting openPluginSettings for ID:", pluginId);
+    showToast(`[Debug 1/4] Targeted ID: ${pluginId.slice(0, 25)}...`, undefined);
 
+    const plugin = plugins[pluginId] as any;
     if (!plugin) {
-        showToast("Plugin not installed", undefined);
+        showToast("Error: Plugin object not found in store", undefined);
         return;
     }
 
     try {
-        const SettingsComponent = typeof getSettings === "function" ? getSettings(pluginId) : null;
+        console.log("[PluginCommands] Plugin Manifest:", plugin.manifest);
+        
+        if (typeof getSettings !== "function") {
+            showToast("Error: getSettings is not a function", undefined);
+            console.error("[PluginCommands] getSettings import is invalid:", getSettings);
+            return;
+        }
+
+        const SettingsComponent = getSettings(pluginId);
+        console.log("[PluginCommands] getSettings output:", SettingsComponent);
 
         if (!SettingsComponent) {
-            showToast("This plugin has no settings UI", undefined);
+            showToast("Error: getSettings returned null/undefined", undefined);
             return;
         }
 
-        if (!Navigator || !Navigation?.push) {
-            showToast("Navigation router not available", undefined);
+        showToast(`[Debug 2/4] Component found: ${typeof SettingsComponent}`, undefined);
+
+        console.log("[PluginCommands] Navigation module:", Navigation);
+        console.log("[PluginCommands] Navigator module:", Navigator);
+
+        if (!Navigation?.push) {
+            showToast("Error: Navigation.push is missing", undefined);
             return;
         }
 
+        if (!Navigator) {
+            showToast("Error: Navigator component is missing", undefined);
+            return;
+        }
+
+        showToast("[Debug 3/4] Executing Navigation.push...", undefined);
+
+        // Attempting screen push via JSX
         Navigation.push(() => (
             <Navigator
                 initialRouteName="PluginSettingsView"
@@ -59,14 +83,30 @@ function openPluginSettings(pluginId: string) {
                 screens={{
                     PluginSettingsView: {
                         title: plugin.manifest?.name || "Plugin Settings",
-                        headerLeft: modalCloseButton?.(() => Navigation.pop()),
-                        render: () => <SettingsComponent />,
+                        headerLeft: modalCloseButton?.(() => {
+                            console.log("[PluginCommands] Close button pressed");
+                            Navigation.pop();
+                        }),
+                        render: () => {
+                            console.log("[PluginCommands] Rendering SettingsComponent inside screen...");
+                            try {
+                                return <SettingsComponent />;
+                            } catch (renderErr: any) {
+                                console.error("[PluginCommands] Render error inside settings:", renderErr);
+                                showToast(`Render error: ${renderErr?.message || renderErr}`, undefined);
+                                return null;
+                            }
+                        },
                     },
                 }}
             />
         ));
+
+        showToast("[Debug 4/4] Navigation.push call completed", undefined);
+
     } catch (err: any) {
-        showToast(`Failed to open settings: ${err?.message || err}`, undefined);
+        console.error("[PluginCommands] Exception caught in openPluginSettings:", err);
+        showToast(`Fatal: ${err?.message || String(err)}`, undefined);
     }
 }
 
