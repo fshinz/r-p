@@ -128,7 +128,7 @@ export default {
             registerCommand({
                 name: "plugin-settings",
                 displayName: "plugin-settings",
-                description: "Open settings UI for an installed plugin",
+                description: "Open settings for an installed plugin",
                 options: [
                     {
                         name: "plugin",
