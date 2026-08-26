@@ -1,1 +1,1 @@
-{"name":"PluginCommands","description":"Manage, install, uninstall, and open plugin settings directly via slash commands.","authors":[{"name":"fshinz","id":"0"}],"main":"index.js","version":"1.0.0","hash":"7a060c1b1ff208f8d9d9d82c93a2c1377f9f02e79b70850b5e72504460daf432"}
+{"name":"PluginCommands","description":"Manage, install, uninstall, and open plugin settings directly via slash commands.","authors":[{"name":"fshinz","id":"0"}],"main":"index.js","version":"1.0.0","hash":"d13772935b799511dc4079d988bede27644db93d95e29bd1c827b5dfac609909"}
