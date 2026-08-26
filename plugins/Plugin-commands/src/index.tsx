@@ -1,19 +1,17 @@
 import { registerCommand } from "@vendetta/commands";
 import { installPlugin, removePlugin, plugins, getSettings } from "@vendetta/plugins";
-import { findByProps } from "@vendetta/metro";
+import { findByProps, findByName } from "@vendetta/metro";
 import { showToast } from "@vendetta/ui/toasts";
-import { React, NavigationNative } from "@vendetta/metro/common";
+import { React } from "@vendetta/metro/common";
 
 let unregisterCommands: Array<() => void> = [];
 
-// 1. Resolve Navigation Dispatchers from Metro
-const NavigationRouter = 
-    findByProps("push", "pop", "popToTop") || 
-    findByProps("push", "pop") ||
-    findByProps("pushLazy");
-
-// 2. Fallback to openScreen or standard UI routers
-const openScreen = findByProps("openScreen")?.openScreen;
+// 1. Resolve Navigation modules matching your working modal snippet
+const Navigation = findByProps("push", "pushLazy", "pop");
+const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
+const modalCloseButton =
+    findByProps("getRenderCloseButton")?.getRenderCloseButton ??
+    findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
 
 // Helper to find plugin ID by matching input string against URL or Manifest Name
 function findPluginId(query: string): string | null {
@@ -30,7 +28,7 @@ function findPluginId(query: string): string | null {
     );
 }
 
-// Opens the plugin's exported settings screen safely
+// Opens the plugin settings page using the working Modal implementation
 function openPluginSettings(pluginId: string) {
     const plugin = plugins[pluginId] as any;
     if (!plugin) {
@@ -46,30 +44,36 @@ function openPluginSettings(pluginId: string) {
             return;
         }
 
+        if (!Navigation || !Navigator) {
+            showToast("Error: Navigation stack modules not found", undefined);
+            return;
+        }
+
         const title = plugin.manifest?.name || "Plugin Settings";
 
-        // Strategy 1: openScreen helper (standard in modern client builds)
-        if (typeof openScreen === "function") {
-            openScreen("WidgetSettings", {
-                title,
-                render: () => <SettingsComponent />,
-            });
-            return;
-        }
-
-        // Strategy 2: Direct push via standard NavigationRouter module
-        if (typeof NavigationRouter?.push === "function") {
-            NavigationRouter.push(SettingsComponent, { title });
-            return;
-        }
-
-        // Strategy 3: Push screen function passed from React Navigation context
-        if (typeof NavigationNative?.push === "function") {
-            NavigationNative.push(SettingsComponent);
-            return;
-        }
-
-        showToast("Error: Navigation module could not be mounted", undefined);
+        // Push using pure React.createElement to prevent React element/JSX bundle mismatch
+        Navigation.push(() =>
+            React.createElement(Navigator, {
+                initialRouteName: "PluginSettingsModal",
+                screens: {
+                    PluginSettingsModal: {
+                        title: title,
+                        headerLeft: modalCloseButton?.(() => {
+                            if (typeof Navigation?.pop === "function") Navigation.pop();
+                        }),
+                        render: () => {
+                            try {
+                                return React.createElement(SettingsComponent);
+                            } catch (renderErr: any) {
+                                console.error("[PluginCommands] Render error inside settings:", renderErr);
+                                showToast(`Render error: ${renderErr?.message || renderErr}`, undefined);
+                                return null;
+                            }
+                        },
+                    },
+                },
+            })
+        );
     } catch (err: any) {
         console.error("[PluginCommands] Exception caught in openPluginSettings:", err);
         showToast(`Fatal: ${err?.message || String(err)}`, undefined);
