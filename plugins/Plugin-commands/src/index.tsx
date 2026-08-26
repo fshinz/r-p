@@ -13,27 +13,52 @@ const modalCloseButton =
     findByProps("getRenderCloseButton")?.getRenderCloseButton ??
     findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
 
+// Safely unwraps the reactive store into standard plugin objects
+function getPluginsMap(): Record<string, any> {
+    // Check internal store property if available, otherwise clone proxy
+    const rawPlugins = (plugins as any)?.plugins || plugins || {};
+    try {
+        return typeof rawPlugins === "object" ? { ...rawPlugins } : {};
+    } catch {
+        return {};
+    }
+}
+
 // Returns an array of formatted choices for the autocomplete dropdown menu
 function getPluginAutocompleteChoices(input: string) {
     const query = input.toLowerCase().trim();
+    const pluginMap = getPluginsMap();
+    const pluginIds = Object.keys(pluginMap);
 
-    return Object.keys(plugins)
+    if (pluginIds.length === 0) {
+        return [
+            {
+                name: "No installed plugins found",
+                displayName: "No installed plugins found",
+                value: "none",
+            },
+        ];
+    }
+
+    return pluginIds
         .map((id) => {
-            const plugin = plugins[id];
+            const plugin = pluginMap[id];
             const name = plugin?.manifest?.name || id;
             return {
-                name: name, // Label shown in the menu
+                name: name,
                 displayName: name,
-                value: id,   // Exact ID passed to execute handler
+                value: id,
             };
         })
         .filter((choice) => choice.name.toLowerCase().includes(query))
-        .slice(0, 25); // Discord supports up to 25 autocomplete items
+        .slice(0, 25);
 }
 
 // Opens the plugin settings page using the working Modal implementation
 function openPluginSettings(pluginId: string) {
-    const plugin = plugins[pluginId] as any;
+    const pluginMap = getPluginsMap();
+    const plugin = pluginMap[pluginId];
+
     if (!plugin) {
         showToast("Error: Plugin object not found in store", undefined);
         return;
@@ -137,17 +162,13 @@ export default {
                 },
                 execute: async (args) => {
                     const targetId = args[0]?.value?.trim();
-                    if (!targetId) return;
+                    if (!targetId || targetId === "none") return;
 
-                    if (plugins[targetId]) {
-                        try {
-                            await removePlugin(targetId);
-                            showToast("Plugin uninstalled", undefined);
-                        } catch (err: any) {
-                            showToast(`Failed to uninstall: ${err?.message || err}`, undefined);
-                        }
-                    } else {
-                        showToast("Plugin not found in installed list", undefined);
+                    try {
+                        await removePlugin(targetId);
+                        showToast("Plugin uninstalled", undefined);
+                    } catch (err: any) {
+                        showToast(`Failed to uninstall: ${err?.message || err}`, undefined);
                     }
                 },
             })
@@ -176,13 +197,9 @@ export default {
                 },
                 execute: (args) => {
                     const targetId = args[0]?.value?.trim();
-                    if (!targetId) return;
+                    if (!targetId || targetId === "none") return;
 
-                    if (plugins[targetId]) {
-                        openPluginSettings(targetId);
-                    } else {
-                        showToast("Selected plugin is not installed", undefined);
-                    }
+                    openPluginSettings(targetId);
                 },
             })
         );
