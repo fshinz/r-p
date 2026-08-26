@@ -3,10 +3,11 @@ import { installPlugin, removePlugin, plugins, fetchPlugin } from "@vendetta/plu
 import { findByProps } from "@vendetta/metro";
 import { showToast } from "@vendetta/ui/toasts";
 import { React } from "@vendetta/metro/common";
+import { pushModal } from "@vendetta/ui/modals";
 
 let unregisterCommands: Array<() => void> = [];
 
-// Helper to resolve navigation modules across client builds
+// Helper to safely obtain the top-level native router
 function getNavigation() {
     return (
         findByProps("push", "pop", "openLazy") ||
@@ -14,7 +15,7 @@ function getNavigation() {
     );
 }
 
-// Opens a plugin's settings view programmatically
+// Opens the plugin's exported `settings` React Component
 async function openPluginSettings(pluginId: string) {
     const plugin = plugins[pluginId];
 
@@ -24,26 +25,36 @@ async function openPluginSettings(pluginId: string) {
     }
 
     try {
-        // Fetch/evaluate the plugin manifest and exports if not already present
+        // Fetch or resolve evaluated plugin module
         const loadedPlugin = await fetchPlugin(pluginId);
-        const SettingsView = loadedPlugin?.settings;
+        
+        // Grab default export or settings key
+        const SettingsComponent = loadedPlugin?.settings || loadedPlugin?.default?.settings;
 
-        if (!SettingsView) {
+        if (!SettingsComponent) {
             showToast("This plugin has no settings UI", undefined);
             return;
         }
 
         const navigation = getNavigation();
 
+        // 1. Primary Strategy: Push as a Custom Screen onto Navigation Router
         if (navigation?.push) {
-            // Push directly onto Discord's native navigation stack
             navigation.push("VendettaCustomPage", {
-                title: plugin.manifest.name || "Plugin Settings",
-                render: () => React.createElement(SettingsView),
+                title: plugin.manifest?.name || "Plugin Settings",
+                render: () => React.createElement(SettingsComponent),
             });
-        } else {
-            showToast("Failed to locate navigation router", undefined);
+            return;
         }
+
+        // 2. Fallback Strategy: Render inside a Modal sheet
+        pushModal({
+            key: `plugin-settings-${pluginId}`,
+            modal: {
+                title: plugin.manifest?.name || "Plugin Settings",
+                body: React.createElement(SettingsComponent),
+            },
+        });
     } catch (e: any) {
         showToast(`Error opening settings: ${e?.message || e}`, undefined);
     }
@@ -61,7 +72,7 @@ export default {
                     {
                         name: "url",
                         displayName: "url",
-                        description: "Direct manifest link (e.g. https://example.com/plugin/)",
+                        description: "Direct manifest link",
                         type: 3, // STRING
                         required: true,
                     },
@@ -100,7 +111,6 @@ export default {
                     const target = args[0]?.value?.trim();
                     if (!target) return;
 
-                    // Match exact URL/ID or search by manifest plugin name
                     const matchedId = Object.keys(plugins).find(
                         (id) =>
                             id.toLowerCase() === target.toLowerCase() ||
@@ -121,7 +131,7 @@ export default {
             })
         );
 
-        // 3. /plugin-settings [url_or_name]
+        // 3. /plugin-settings [plugin]
         unregisterCommands.push(
             registerCommand({
                 name: "plugin-settings",
