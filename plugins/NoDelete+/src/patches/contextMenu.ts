@@ -22,12 +22,9 @@ function patchFn(args: any[], ret: any) {
         const items = getMainItems(ret);
         if (!items) return;
         
-        // Check if already patched
         if (items.some((i: any) => i?.label === "Ignore User" || i?.label === "Unignore User")) return;
         
         const isIgnored = storage.ignore?.users?.includes(userId);
-        
-        // Find where to insert (before destructive items)
         const insertIndex = items.findIndex((i: any) => i?.isDestructive);
         const index = insertIndex === -1 ? items.length : insertIndex;
         
