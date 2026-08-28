@@ -8,7 +8,6 @@ import { showConfirmationAlert } from "@vendetta/ui/alerts";
 import { findByStoreName } from "@vendetta/metro";
 
 const { FormText, FormSection, FormRow } = Forms;
-
 let UserStore: any;
 
 export default function Settings() {
@@ -41,7 +40,7 @@ export default function Settings() {
 
   return (
     <ReactNative.ScrollView style={{ flex: 1 }}>
-      <FormSection title="Message Logger Settings">
+      <FormSection title="Settings">
         <FormRow
           label="Ignore Bots"
           subLabel="Don't log messages from bots"
@@ -56,7 +55,7 @@ export default function Settings() {
 
       <FormSection title="Ignored Users">
         <FormRow
-          label="Clear All Ignored Users"
+          label="Clear All"
           subLabel={`${users.length} users ignored`}
           trailing={<FormRow.Icon source={getAssetIDByName("ic_trash_24px")} />}
           onPress={handleClearUsers}
@@ -81,10 +80,6 @@ export default function Settings() {
             );
           })
         )}
-        
-        <FormText style={{ padding: 10, color: "#999" }}>
-          Right-click a user and select "Ignore User" to add them to this list.
-        </FormText>
       </FormSection>
     </ReactNative.ScrollView>
   );
