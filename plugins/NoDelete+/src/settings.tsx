@@ -1,119 +1,91 @@
 import { React, ReactNative } from "@vendetta/metro/common";
+import { Forms } from "@vendetta/ui/components";
 import { storage } from "@vendetta/plugin";
 import { useProxy } from "@vendetta/storage";
-import { showConfirmationAlert } from "@vendetta/ui/alerts";
-import { Forms } from "@vendetta/ui/components";
 import { getAssetIDByName } from "@vendetta/ui/assets";
-import { findByStoreName, findByProps } from "@vendetta/metro";
+import { showToast } from "@vendetta/ui/toasts";
+import { showConfirmationAlert } from "@vendetta/ui/alerts";
+import { findByStoreName } from "@vendetta/metro";
+
+const { FormText, FormSection, FormRow } = Forms;
 
 let UserStore: any;
-let UncachedUserManager: any;
-let Profiles: any;
 
-export default () => {
+export default function Settings() {
   UserStore ??= findByStoreName("UserStore");
-  UncachedUserManager ??= findByProps("fetchProfile", "getUser", "setFlag");
-  Profiles ??= findByProps("showUserProfile");
-
-  async function openProfile(userId: string) {
-    const show = Profiles?.showUserProfile;
-    if (!show) return;
-
-    if (UserStore.getUser(userId)) {
-      show({ userId });
-    } else {
-      UncachedUserManager.getUser(userId).then(({ id }: { id: string }) => show({ userId: id }));
-    }
-  }
-
   useProxy(storage);
-  const users: string[] = storage.ignore.users ?? [];
+
+  storage.ignore ??= { users: [], bots: false };
+  const [users, setUsers] = React.useState(storage.ignore.users || []);
 
   const handleRemoveUser = (userId: string) => {
-    storage.ignore.users = users.filter((id) => id !== userId);
+    const newArr = users.filter((id: string) => id !== userId);
+    storage.ignore.users = newArr;
+    setUsers(newArr);
+    showToast("User removed from ignore list", getAssetIDByName("Check"));
   };
 
   const handleClearUsers = () => {
-    storage.ignore.users = [];
+    showConfirmationAlert({
+      title: "Clear Ignored Users",
+      content: `Remove all ${users.length} users from ignore list?`,
+      confirmText: "Clear",
+      cancelText: "Cancel",
+      onConfirm: () => {
+        storage.ignore.users = [];
+        setUsers([]);
+        showToast("Cleared all ignored users", getAssetIDByName("Check"));
+      }
+    });
   };
 
   return (
     <ReactNative.ScrollView style={{ flex: 1 }}>
-      <Forms.FormSection title="Settings" titleStyleType="no_border">
-        <Forms.FormRow 
-          label="Show Timestamps" 
-          trailing={
-            <Forms.FormSwitch 
-              value={storage.timestamps} 
-              onValueChange={(v: boolean) => (storage.timestamps = v)} 
-            />
-          } 
-        />
-        <Forms.FormRow 
-          label="12-Hour Format" 
-          trailing={
-            <Forms.FormSwitch 
-              value={storage.ew} 
-              onValueChange={(v: boolean) => (storage.ew = v)} 
-            />
-          } 
-        />
-        <Forms.FormDivider />
-        <Forms.FormRow label="Deleted messages display an Automod indicator." />
-      </Forms.FormSection>
-
-      <Forms.FormSection title="Filters">
-        <Forms.FormRow 
-          label="Ignore Bots" 
+      <FormSection title="Message Logger Settings">
+        <FormRow
+          label="Ignore Bots"
+          subLabel="Don't log messages from bots"
           trailing={
             <Forms.FormSwitch 
               value={storage.ignore.bots} 
-              onValueChange={(value: boolean) => (storage.ignore.bots = value)} 
+              onValueChange={(v: boolean) => { storage.ignore.bots = v; }} 
             />
-          } 
+          }
         />
-        <Forms.FormRow
-          label={`Clear Ignored Users (${users.length})`}
-          trailing={<Forms.FormRow.Icon source={getAssetIDByName("ic_trash_24px")} />}
-          onPress={() => {
-            if (users.length > 0) {
-              showConfirmationAlert({
-                title: "Clear Ignored Users",
-                content: `Are you sure you want to clear ${users.length} ignored user(s)?`,
-                confirmText: "Yes",
-                cancelText: "No",
-                confirmColor: "brand",
-                onConfirm: handleClearUsers,
-              });
-            }
-          }}
+      </FormSection>
+
+      <FormSection title="Ignored Users">
+        <FormRow
+          label="Clear All Ignored Users"
+          subLabel={`${users.length} users ignored`}
+          trailing={<FormRow.Icon source={getAssetIDByName("ic_trash_24px")} />}
+          onPress={handleClearUsers}
         />
-
-        <ReactNative.ScrollView style={{ flex: 1, marginLeft: 15 }}>
-          {users.map((id) => {
-            const user = UserStore.getUser(id) ?? {};
-            const pfp = user?.getAvatarURL?.(null, 26)?.replace?.(/\.(gif|webp)/, ".png") 
-                        || "https://cdn.discordapp.com/embed/avatars/1.png?size=48";
-
-            const username = user.username 
-              ? `${user.username}${user.discriminator && user.discriminator !== "0" ? `#${user.discriminator}` : ""}`
-              : `${id} (Uncached)`;
-
+        
+        {users.length === 0 ? (
+          <FormText style={{ padding: 10 }}>No users ignored.</FormText>
+        ) : (
+          users.map((id: string) => {
+            const user = UserStore?.getUser(id);
+            const name = user?.username || id;
             return (
-              <Forms.FormRow
+              <FormRow
                 key={id}
-                label={username}
-                leading={<Forms.FormRow.Icon source={{ uri: pfp }} />}
-                trailing={<Forms.FormRow.Icon source={getAssetIDByName("ic_close_24px")} />}
-                onPress={() => openProfile(id)}
-                onTrailingPress={() => handleRemoveUser(id)}
+                label={name}
+                trailing={
+                  <ReactNative.TouchableOpacity onPress={() => handleRemoveUser(id)}>
+                    <FormRow.Icon source={getAssetIDByName("ic_close_24px")} />
+                  </ReactNative.TouchableOpacity>
+                }
               />
             );
-          })}
-        </ReactNative.ScrollView>
-        <Forms.FormDivider />
-        <Forms.FormRow label="Long-press a user profile sheet to ignore/unignore them." />
-      </Forms.FormSection>
+          })
+        )}
+        
+        <FormText style={{ padding: 10, color: "#999" }}>
+          Right-click a user and select "Ignore User" to add them to this list.
+        </FormText>
+      </FormSection>
     </ReactNative.ScrollView>
   );
-};
+}
