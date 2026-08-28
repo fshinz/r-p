@@ -14,28 +14,28 @@ const deletedMessages: string[] = [];
 storage.ignore ??= { users: [], bots: false };
 
 const formatMessageContent = (message: any) => {
-  let content = message.content || "";
+  let content = "";
   
-  // Add embeds as text
+  if (message.content) {
+    content += message.content;
+  }
+  
   if (message.embeds?.length > 0) {
     message.embeds.forEach((embed: any) => {
-      if (embed.title) content += `\n\n📎 ${embed.title}`;
+      if (embed.title) content += `\n${embed.title}`;
       if (embed.description) content += `\n${embed.description}`;
       if (embed.fields?.length > 0) {
         embed.fields.forEach((field: any) => {
-          content += `\n\n**${field.name}**\n${field.value}`;
+          content += `\n\n${field.name}\n${field.value}`;
         });
       }
-      if (embed.url) content += `\n\n🔗 ${embed.url}`;
-      if (embed.image?.url) content += `\n🖼️ ${embed.image.url}`;
+      if (embed.url) content += `\n${embed.url}`;
     });
   }
   
-  // Add attachments
   if (message.attachments?.length > 0) {
     message.attachments.forEach((att: any) => {
-      content += `\n\n📁 ${att.filename} (${Math.round(att.size / 1024)}KB)`;
-      if (att.url) content += `\n${att.url}`;
+      content += `\n${att.filename} (${Math.round(att.size / 1024)}KB)`;
     });
   }
   
@@ -47,44 +47,91 @@ export default {
     try {
       MessageStore = findByStoreName("MessageStore");
 
-      // Handle deleted messages
+      // Handle deleted messages (including bulk)
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           try {
             const event = args[0];
-            if (!event || event?.type !== "MESSAGE_DELETE") return;
-            if (!event?.id || !event?.channelId) return;
+            
+            if (event?.type === "MESSAGE_DELETE") {
+              if (!event?.id || !event?.channelId) return;
+              
+              const message = MessageStore?.getMessage(event.channelId, event.id);
+              if (!message) return;
 
-            const message = MessageStore?.getMessage(event.channelId, event.id);
-            if (!message) return;
+              if (storage.ignore?.users?.includes(message.author?.id)) return;
+              if (storage.ignore?.bots && message.author?.bot) return;
 
-            if (storage.ignore?.users?.includes(message.author?.id)) return;
-            if (storage.ignore?.bots && message.author?.bot) return;
+              if (deletedMessages.includes(event.id)) {
+                deletedMessages.splice(deletedMessages.indexOf(event.id), 1);
+                return;
+              }
+              deletedMessages.push(event.id);
 
-            if (deletedMessages.includes(event.id)) {
-              deletedMessages.splice(deletedMessages.indexOf(event.id), 1);
+              const content = formatMessageContent(message);
+              const time = moment().format("HH:mm:ss");
+
+              args[0] = {
+                type: "MESSAGE_EDIT_FAILED_AUTOMOD",
+                messageData: {
+                  type: 1,
+                  message: {
+                    channelId: event.channelId,
+                    messageId: event.id,
+                  },
+                },
+                errorResponseBody: {
+                  code: 200000,
+                  message: `${content}\n\n*${time}*`,
+                },
+              };
               return;
             }
-            deletedMessages.push(event.id);
-
-            const content = formatMessageContent(message);
-            const author = message.author?.username || "Unknown";
-            const time = moment().format("HH:mm:ss");
-
-            args[0] = {
-              type: "MESSAGE_EDIT_FAILED_AUTOMOD",
-              messageData: {
-                type: 1,
-                message: {
-                  channelId: event.channelId,
-                  messageId: event.id,
+            
+            if (event?.type === "MESSAGE_DELETE_BULK") {
+              if (!event?.ids || !event?.channelId) return;
+              
+              const messages: any[] = [];
+              event.ids.forEach((id: string) => {
+                const msg = MessageStore?.getMessage(event.channelId, id);
+                if (msg) {
+                  if (storage.ignore?.users?.includes(msg.author?.id)) return;
+                  if (storage.ignore?.bots && msg.author?.bot) return;
+                  messages.push(msg);
+                }
+              });
+              
+              if (messages.length === 0) return;
+              
+              let combinedContent = `**${messages.length} messages deleted:**\n\n`;
+              messages.forEach((msg, i) => {
+                const content = formatMessageContent(msg);
+                const author = msg.author?.username || "Unknown";
+                combinedContent += `**${author}**: ${content}`;
+                if (i < messages.length - 1) combinedContent += "\n\n";
+              });
+              
+              const time = moment().format("HH:mm:ss");
+              combinedContent += `\n\n*${time}*`;
+              
+              const firstId = messages[0]?.id || event.ids[0];
+              
+              args[0] = {
+                type: "MESSAGE_EDIT_FAILED_AUTOMOD",
+                messageData: {
+                  type: 1,
+                  message: {
+                    channelId: event.channelId,
+                    messageId: firstId,
+                  },
                 },
-              },
-              errorResponseBody: {
-                code: 200000,
-                message: `**${author}**\n${content}\n\n*${time}*`,
-              },
-            };
+                errorResponseBody: {
+                  code: 200000,
+                  message: combinedContent,
+                },
+              };
+              return;
+            }
           } catch (e) {
             console.error("[MessageLogger] Delete error:", e);
           }
@@ -108,13 +155,11 @@ export default {
             const original = MessageStore?.getMessage(msg.channel_id, msg.id);
             if (!original) return;
 
-            // Check if actually changed
             if (original.content === msg.content && 
                 JSON.stringify(original.embeds) === JSON.stringify(msg.embeds)) return;
 
             const oldContent = formatMessageContent(original);
             const newContent = formatMessageContent(msg);
-            const author = msg.author?.username || "Unknown";
             const time = moment().format("HH:mm:ss");
 
             args[0] = {
@@ -128,7 +173,7 @@ export default {
               },
               errorResponseBody: {
                 code: 200000,
-                message: `**${author}** (edited)\n\nBefore:\n${oldContent}\n\nAfter:\n${newContent}\n\n*${time}*`,
+                message: `${oldContent}\n\n⬇️\n\n${newContent}\n\n*${time}*`,
               },
             };
           } catch (e) {
@@ -137,7 +182,9 @@ export default {
         })
       );
 
+      // Patch context menu
       patches.push(patchContextMenu());
+      
       showToast("Message Logger loaded", getAssetIDByName("Check"));
     } catch (e) {
       console.error("[MessageLogger] Failed to load:", e);
