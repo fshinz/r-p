@@ -1,4 +1,4 @@
-import { findByProps, findByStoreName } from "@vendetta/metro";
+import { findByStoreName } from "@vendetta/metro";
 import { FluxDispatcher, moment } from "@vendetta/metro/common";
 import { storage } from "@vendetta/plugin";
 import { before as patchBefore } from "@vendetta/patcher";
@@ -8,70 +8,44 @@ import Settings from "./settings";
 import { patchContextMenu } from "./patches/contextMenu";
 
 let MessageStore: any;
-let ChannelStore: any;
 const patches: (() => void)[] = [];
 const deletedMessages: string[] = [];
 
-// Storage for ignored users
 storage.ignore ??= { users: [], bots: false };
 
-const formatEmbedContent = (embeds: any[]) => {
-  if (!embeds || embeds.length === 0) return "";
+const formatMessageContent = (message: any) => {
+  let content = message.content || "";
   
-  let content = "📎 **Embeds:**\n";
-  embeds.forEach((embed, i) => {
-    content += `\n**Embed ${i + 1}:**`;
-    if (embed.title) content += `\n• Title: ${embed.title}`;
-    if (embed.description) content += `\n• Description: ${embed.description}`;
-    if (embed.url) content += `\n• URL: ${embed.url}`;
-    if (embed.author?.name) content += `\n• Author: ${embed.author.name}`;
-    if (embed.footer?.text) content += `\n• Footer: ${embed.footer.text}`;
-    if (embed.fields?.length > 0) {
-      content += `\n• Fields:`;
-      embed.fields.forEach((field: any) => {
-        content += `\n  - ${field.name}: ${field.value}`;
-      });
-    }
-    if (embed.image?.url) content += `\n• Image: ${embed.image.url}`;
-    if (embed.thumbnail?.url) content += `\n• Thumbnail: ${embed.thumbnail.url}`;
-  });
-  return content;
-};
-
-const formatAttachmentContent = (attachments: any[]) => {
-  if (!attachments || attachments.length === 0) return "";
-  
-  let content = "📁 **Attachments:**\n";
-  attachments.forEach((att) => {
-    content += `• ${att.filename} (${Math.round(att.size / 1024)}KB)\n`;
-    if (att.url) content += `  ${att.url}\n`;
-  });
-  return content;
-};
-
-const getMessageContent = (message: any) => {
-  let content = "";
-  
-  if (message.content) content += message.content;
-  
+  // Add embeds as text
   if (message.embeds?.length > 0) {
-    content += content ? "\n\n" : "";
-    content += formatEmbedContent(message.embeds);
+    message.embeds.forEach((embed: any) => {
+      if (embed.title) content += `\n\n📎 ${embed.title}`;
+      if (embed.description) content += `\n${embed.description}`;
+      if (embed.fields?.length > 0) {
+        embed.fields.forEach((field: any) => {
+          content += `\n\n**${field.name}**\n${field.value}`;
+        });
+      }
+      if (embed.url) content += `\n\n🔗 ${embed.url}`;
+      if (embed.image?.url) content += `\n🖼️ ${embed.image.url}`;
+    });
   }
   
+  // Add attachments
   if (message.attachments?.length > 0) {
-    content += content ? "\n\n" : "";
-    content += formatAttachmentContent(message.attachments);
+    message.attachments.forEach((att: any) => {
+      content += `\n\n📁 ${att.filename} (${Math.round(att.size / 1024)}KB)`;
+      if (att.url) content += `\n${att.url}`;
+    });
   }
   
-  return content || "(empty message)";
+  return content || "[Empty Message]";
 };
 
 export default {
   onLoad() {
     try {
       MessageStore = findByStoreName("MessageStore");
-      ChannelStore = findByStoreName("ChannelStore");
 
       // Handle deleted messages
       patches.push(
@@ -84,7 +58,6 @@ export default {
             const message = MessageStore?.getMessage(event.channelId, event.id);
             if (!message) return;
 
-            // Check ignore settings
             if (storage.ignore?.users?.includes(message.author?.id)) return;
             if (storage.ignore?.bots && message.author?.bot) return;
 
@@ -94,11 +67,10 @@ export default {
             }
             deletedMessages.push(event.id);
 
-            const content = getMessageContent(message);
+            const content = formatMessageContent(message);
             const author = message.author?.username || "Unknown";
-            const timestamp = moment().format("HH:mm:ss");
+            const time = moment().format("HH:mm:ss");
 
-            // Create replacement message showing deleted content
             args[0] = {
               type: "MESSAGE_EDIT_FAILED_AUTOMOD",
               messageData: {
@@ -110,7 +82,7 @@ export default {
               },
               errorResponseBody: {
                 code: 200000,
-                message: `🚫 **${author}** deleted a message:\n${content}\n\n_Deleted at ${timestamp}_`,
+                message: `**${author}**\n${content}\n\n*${time}*`,
               },
             };
           } catch (e) {
@@ -130,24 +102,21 @@ export default {
             const msg = event.message;
             if (!msg.id || !msg.channel_id) return;
 
-            // Check ignore settings
             if (storage.ignore?.users?.includes(msg.author?.id)) return;
             if (storage.ignore?.bots && msg.author?.bot) return;
 
-            // Get original message
             const original = MessageStore?.getMessage(msg.channel_id, msg.id);
             if (!original) return;
 
-            // Check if content actually changed
+            // Check if actually changed
             if (original.content === msg.content && 
                 JSON.stringify(original.embeds) === JSON.stringify(msg.embeds)) return;
 
-            const oldContent = getMessageContent(original);
-            const newContent = getMessageContent(msg);
+            const oldContent = formatMessageContent(original);
+            const newContent = formatMessageContent(msg);
             const author = msg.author?.username || "Unknown";
-            const timestamp = moment().format("HH:mm:ss");
+            const time = moment().format("HH:mm:ss");
 
-            // Create replacement message showing edit
             args[0] = {
               type: "MESSAGE_EDIT_FAILED_AUTOMOD",
               messageData: {
@@ -159,7 +128,7 @@ export default {
               },
               errorResponseBody: {
                 code: 200000,
-                message: `✏️ **${author}** edited a message:\n\n**Before:**\n${oldContent}\n\n**After:**\n${newContent}\n\n_Edited at ${timestamp}_`,
+                message: `**${author}** (edited)\n\nBefore:\n${oldContent}\n\nAfter:\n${newContent}\n\n*${time}*`,
               },
             };
           } catch (e) {
@@ -168,9 +137,7 @@ export default {
         })
       );
 
-      // Add context menu patch
       patches.push(patchContextMenu());
-
       showToast("Message Logger loaded", getAssetIDByName("Check"));
     } catch (e) {
       console.error("[MessageLogger] Failed to load:", e);
