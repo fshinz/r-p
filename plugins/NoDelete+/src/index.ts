@@ -5,6 +5,7 @@ import { before as patchBefore } from "@vendetta/patcher";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import { showToast } from "@vendetta/ui/toasts";
 import Settings from "./settings";
+import { patchContextMenu } from "./patches/contextMenu";
 
 let MessageStore: any;
 let ChannelStore: any;
@@ -166,6 +167,9 @@ export default {
           }
         })
       );
+
+      // Add context menu patch
+      patches.push(patchContextMenu());
 
       showToast("Message Logger loaded", getAssetIDByName("Check"));
     } catch (e) {
