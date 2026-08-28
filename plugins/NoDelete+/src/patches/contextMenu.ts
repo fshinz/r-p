@@ -14,12 +14,10 @@ export function patchContextMenu() {
       
       const props = tree.props.content.props;
       
-      // Check if option already exists
       if (props.options.some((opt: any) => 
         opt?.label === "Ignore User" || opt?.label === "Unignore User"
       )) return;
 
-      // Get user ID from the tree
       const userId = Object.keys(tree._owner.stateNode._keyChildMapping)
         .find(str => tree._owner.stateNode._keyChildMapping[str] && str.match(/(?<=\$UserProfile)\d+/))
         ?.slice?.(".$UserProfile".length);
