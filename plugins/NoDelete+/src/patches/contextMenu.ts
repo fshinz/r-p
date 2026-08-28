@@ -1,48 +1,62 @@
-import { findByProps } from "@vendetta/metro";
-import { findInReactTree } from "@vendetta/utils";
+import { after } from "@vendetta/patcher";
+import { findByName } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
 import { showToast } from "@vendetta/ui/toasts";
-import { before as patchBefore } from "@vendetta/patcher";
 
-const ContextMenu = findByProps("render", "ScrollView");
+const NAMES = ["UserProfileOverflowMenu", "BotUserProfileOverflowMenu"];
+
+function getMainItems(ret: any): any[] | null {
+    let items = ret?.props?.items;
+    if (Array.isArray(items) && Array.isArray(items[0])) return items[0];
+    items = ret?.props?.children?.props?.items;
+    if (Array.isArray(items) && Array.isArray(items[0])) return items[0];
+    return null;
+}
+
+function patchFn(args: any[], ret: any) {
+    try {
+        const props = args[0] ?? {};
+        const userId = props.user?.id;
+        if (!userId) return;
+        
+        const items = getMainItems(ret);
+        if (!items) return;
+        
+        // Check if already patched
+        if (items.some((i: any) => i?.label === "Ignore User" || i?.label === "Unignore User")) return;
+        
+        const isIgnored = storage.ignore?.users?.includes(userId);
+        
+        // Find where to insert (before destructive items)
+        const insertIndex = items.findIndex((i: any) => i?.isDestructive);
+        const index = insertIndex === -1 ? items.length : insertIndex;
+        
+        items.splice(index, 0, {
+            label: isIgnored ? "Unignore User" : "Ignore User",
+            isDestructive: !isIgnored,
+            action: () => {
+                if (isIgnored) {
+                    storage.ignore.users = storage.ignore.users.filter((id: string) => id !== userId);
+                    showToast(`Unignored ${props.user?.username || "user"}`);
+                } else {
+                    if (!storage.ignore.users) storage.ignore.users = [];
+                    storage.ignore.users.push(userId);
+                    showToast(`Ignoring ${props.user?.username || "user"}`);
+                }
+            }
+        });
+    } catch (e) {
+        console.error("[MessageLogger] Context menu error:", e);
+    }
+}
 
 export function patchContextMenu() {
-  return patchBefore("render", ContextMenu.View, (args) => {
-    try {
-      const tree = findInReactTree(args, (r) => r.key === ".$UserProfileOverflow");
-      if (!tree || !tree.props || tree.props.sheetKey !== "UserProfileOverflow") return;
-      
-      const props = tree.props.content.props;
-      
-      if (props.options.some((opt: any) => 
-        opt?.label === "Ignore User" || opt?.label === "Unignore User"
-      )) return;
+    const unpatches: (() => void)[] = [];
 
-      const userId = Object.keys(tree._owner.stateNode._keyChildMapping)
-        .find(str => tree._owner.stateNode._keyChildMapping[str] && str.match(/(?<=\$UserProfile)\d+/))
-        ?.slice?.(".$UserProfile".length);
-
-      if (!userId) return;
-
-      const isIgnored = storage.ignore?.users?.includes(userId);
-      const optionPosition = props.options.findLastIndex((opt: any) => opt.isDestructive);
-
-      props.options.splice(optionPosition + 1, 0, {
-        isDestructive: !isIgnored,
-        label: isIgnored ? "Unignore User" : "Ignore User",
-        onPress: () => {
-          if (isIgnored) {
-            storage.ignore.users = storage.ignore.users.filter((id: string) => id !== userId);
-            showToast(`Unignored ${props.header.title}`);
-          } else {
-            storage.ignore.users.push(userId);
-            showToast(`Ignoring ${props.header.title}`);
-          }
-          props.hideActionSheet();
-        },
-      });
-    } catch (e) {
-      console.error("[MessageLogger] Context menu error:", e);
+    for (const name of NAMES) {
+        const mod = findByName(name, false);
+        if (mod) unpatches.push(after("default", mod, patchFn));
     }
-  });
+
+    return () => { for (const fn of unpatches) fn(); };
 }
