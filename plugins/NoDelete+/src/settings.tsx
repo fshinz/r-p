@@ -14,7 +14,7 @@ export default function Settings() {
   UserStore ??= findByStoreName("UserStore");
   useProxy(storage);
 
-  storage.ignore ??= { users: [], bots: false };
+  storage.ignore ??= { users: [], bots: false, ownMessages: false };
   const [users, setUsers] = React.useState(storage.ignore.users || []);
 
   const handleRemoveUser = (userId: string) => {
@@ -48,6 +48,16 @@ export default function Settings() {
             <Forms.FormSwitch
               value={storage.ignore.bots}
               onValueChange={(v: boolean) => { storage.ignore.bots = v; }}
+            />
+          }
+        />
+        <FormRow
+          label="Ignore My Own Messages"
+          subLabel="Don't log deletions or edits of your own messages"
+          trailing={
+            <Forms.FormSwitch
+              value={storage.ignore.ownMessages}
+              onValueChange={(v: boolean) => { storage.ignore.ownMessages = v; }}
             />
           }
         />
