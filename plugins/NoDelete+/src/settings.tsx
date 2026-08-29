@@ -1,4 +1,5 @@
 import React from "react";
+import { View, Text, Switch, TouchableOpacity, ScrollView } from "react-native";
 import { findByProps, findByStoreName } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
 import { useProxy } from "@vendetta/storage";
@@ -6,16 +7,16 @@ import { getAssetIDByName } from "@vendetta/ui/assets";
 import { showToast } from "@vendetta/ui/toasts";
 import { showConfirmationAlert } from "@vendetta/ui/alerts";
 
-// Metro component lookups
-const find = (prop: string): any => findByProps(prop)?.[prop];
-const TableFamily: any = findByProps("TableRowGroup", "Stack");
+// Fetch theme colors dynamically from Discord's token system
+const { rawColors, ThemeStore } = findByProps("rawColors", "ThemeStore") || {};
+const theme = ThemeStore?.theme || "dark";
+const isDark = theme.includes("dark");
 
-const TableRowGroup: any = TableFamily?.TableRowGroup;
-const TableRow: any = find("TableRow");
-const TableRowIcon: any = find("TableRowIcon");
-const TableSwitchRow: any = find("TableSwitchRow");
-const Stack: any = TableFamily?.Stack;
-const ScrollView: any = find("ScrollView");
+const backgroundColor = isDark ? "#2f3136" : "#f2f3f5";
+const cardBg = isDark ? "#202225" : "#ffffff";
+const textColor = isDark ? "#ffffff" : "#060607";
+const subTextColor = isDark ? "#b9bbbe" : "#4f545c";
+const borderColor = isDark ? "#36393f" : "#e3e5e8";
 
 let UserStore: any;
 
@@ -49,49 +50,72 @@ export default function Settings() {
   };
 
   return (
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 10 }}>
-      <Stack spacing={12}>
-        <TableRowGroup title="Filters">
-          <TableSwitchRow
-            label="Ignore Bots"
-            subLabel="Don't log messages sent by bot accounts"
+    <ScrollView style={{ flex: 1, backgroundColor }} contentContainerStyle={{ padding: 16 }}>
+      {/* FILTERS SECTION */}
+      <Text style={{ fontSize: 12, fontWeight: "bold", color: subTextColor, marginBottom: 8, textTransform: "uppercase" }}>
+        Filters
+      </Text>
+      <View style={{ backgroundColor: cardBg, borderRadius: 10, overflow: "hidden", marginBottom: 20 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 14, borderBottomWidth: 1, borderBottomColor: borderColor }}>
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            <Text style={{ fontSize: 16, color: textColor, fontWeight: "500" }}>Ignore Bots</Text>
+            <Text style={{ fontSize: 12, color: subTextColor, marginTop: 2 }}>Don't log messages sent by bot accounts</Text>
+          </View>
+          <Switch
             value={!!storage.ignore.bots}
             onValueChange={(v: boolean) => {
               storage.ignore.bots = v;
             }}
           />
-          <TableSwitchRow
-            label="Ignore My Own Messages"
-            subLabel="Don't log deletions or edits of your own messages"
+        </View>
+
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 14 }}>
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            <Text style={{ fontSize: 16, color: textColor, fontWeight: "500" }}>Ignore My Own Messages</Text>
+            <Text style={{ fontSize: 12, color: subTextColor, marginTop: 2 }}>Don't log deletions or edits of your own messages</Text>
+          </View>
+          <Switch
             value={!!storage.ignore.ownMessages}
             onValueChange={(v: boolean) => {
               storage.ignore.ownMessages = v;
             }}
           />
-        </TableRowGroup>
+        </View>
+      </View>
 
-        <TableRowGroup title="Ignored Users">
-          <TableRow
-            label="Clear All Ignored Users"
-            subLabel={`${users.length} user${users.length === 1 ? "" : "s"} ignored`}
-            icon={<TableRowIcon source={getAssetIDByName("ic_trash_24px")} />}
-            onPress={handleClearUsers}
-          />
+      {/* IGNORED USERS SECTION */}
+      <Text style={{ fontSize: 12, fontWeight: "bold", color: subTextColor, marginBottom: 8, textTransform: "uppercase" }}>
+        Ignored Users
+      </Text>
+      <View style={{ backgroundColor: cardBg, borderRadius: 10, overflow: "hidden" }}>
+        <TouchableOpacity
+          onPress={handleClearUsers}
+          style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 14, borderBottomWidth: users.length > 0 ? 1 : 0, borderBottomColor: borderColor }}
+        >
+          <View>
+            <Text style={{ fontSize: 16, color: "#ed4245", fontWeight: "500" }}>Clear All Ignored Users</Text>
+            <Text style={{ fontSize: 12, color: subTextColor, marginTop: 2 }}>
+              {users.length} user{users.length === 1 ? "" : "s"} ignored
+            </Text>
+          </View>
+        </TouchableOpacity>
 
-          {users.map((id: string) => {
-            const user = UserStore?.getUser(id);
-            const name = user?.username ? `@${user.username}` : `User ID: ${id}`;
-            return (
-              <TableRow
-                key={id}
-                label={name}
-                icon={<TableRowIcon source={getAssetIDByName("ic_close_24px")} />}
-                onPress={() => handleRemoveUser(id)}
-              />
-            );
-          })}
-        </TableRowGroup>
-      </Stack>
+        {users.map((id: string) => {
+          const user = UserStore?.getUser(id);
+          const name = user?.username ? `@${user.username}` : `User ID: ${id}`;
+          return (
+            <View
+              key={id}
+              style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 14, borderTopWidth: 1, borderTopColor: borderColor }}
+            >
+              <Text style={{ fontSize: 15, color: textColor }}>{name}</Text>
+              <TouchableOpacity onPress={() => handleRemoveUser(id)} style={{ padding: 4 }}>
+                <Text style={{ fontSize: 14, color: "#ed4245", fontWeight: "bold" }}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+          );
+        })}
+      </View>
     </ScrollView>
   );
 }
