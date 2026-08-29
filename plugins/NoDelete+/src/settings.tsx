@@ -5,16 +5,17 @@ import { useProxy } from "@vendetta/storage";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import { showToast } from "@vendetta/ui/toasts";
 import { showConfirmationAlert } from "@vendetta/ui/alerts";
-import { Forms } from "@vendetta/ui/components";
 
-const { FormText, FormRow, FormSwitchRow } = Forms;
-
+// Metro component lookups
 const find = (prop: string): any => findByProps(prop)?.[prop];
 const TableFamily: any = findByProps("TableRowGroup", "Stack");
 
 const TableRowGroup: any = TableFamily?.TableRowGroup;
+const TableRow: any = find("TableRow");
+const TableRowIcon: any = find("TableRowIcon");
+const TableSwitchRow: any = find("TableSwitchRow");
 const Stack: any = TableFamily?.Stack;
-const ScrollView: any = find("ScrollView") || Forms.FormSection;
+const ScrollView: any = find("ScrollView");
 
 let UserStore: any;
 
@@ -33,6 +34,7 @@ export default function Settings() {
   };
 
   const handleClearUsers = () => {
+    if (users.length === 0) return;
     showConfirmationAlert({
       title: "Clear Ignored Users",
       content: `Remove all ${users.length} users from ignore list?`,
@@ -49,8 +51,8 @@ export default function Settings() {
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 10 }}>
       <Stack spacing={12}>
-        <TableRowGroup title="FILTERS">
-          <FormSwitchRow
+        <TableRowGroup title="Filters">
+          <TableSwitchRow
             label="Ignore Bots"
             subLabel="Don't log messages sent by bot accounts"
             value={!!storage.ignore.bots}
@@ -58,7 +60,7 @@ export default function Settings() {
               storage.ignore.bots = v;
             }}
           />
-          <FormSwitchRow
+          <TableSwitchRow
             label="Ignore My Own Messages"
             subLabel="Don't log deletions or edits of your own messages"
             value={!!storage.ignore.ownMessages}
@@ -68,34 +70,26 @@ export default function Settings() {
           />
         </TableRowGroup>
 
-        <TableRowGroup title="IGNORED USERS">
-          <FormRow
+        <TableRowGroup title="Ignored Users">
+          <TableRow
             label="Clear All Ignored Users"
-            subLabel={`${users.length} user${users.length === 1 ? "" : "s"} currently ignored`}
-            trailing={<FormRow.Icon source={getAssetIDByName("ic_trash_24px")} />}
+            subLabel={`${users.length} user${users.length === 1 ? "" : "s"} ignored`}
+            icon={<TableRowIcon source={getAssetIDByName("ic_trash_24px")} />}
             onPress={handleClearUsers}
           />
 
-          {users.length === 0 ? (
-            <FormText style={{ padding: 14, opacity: 0.6 }}>No users currently ignored.</FormText>
-          ) : (
-            users.map((id: string) => {
-              const user = UserStore?.getUser(id);
-              const name = user?.username ? `@${user.username}` : `ID: ${id}`;
-              return (
-                <FormRow
-                  key={id}
-                  label={name}
-                  trailing={
-                    <FormRow.Icon
-                      source={getAssetIDByName("ic_close_24px")}
-                      onPress={() => handleRemoveUser(id)}
-                    />
-                  }
-                />
-              );
-            })
-          )}
+          {users.map((id: string) => {
+            const user = UserStore?.getUser(id);
+            const name = user?.username ? `@${user.username}` : `User ID: ${id}`;
+            return (
+              <TableRow
+                key={id}
+                label={name}
+                icon={<TableRowIcon source={getAssetIDByName("ic_close_24px")} />}
+                onPress={() => handleRemoveUser(id)}
+              />
+            );
+          })}
         </TableRowGroup>
       </Stack>
     </ScrollView>
