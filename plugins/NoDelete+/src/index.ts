@@ -19,7 +19,6 @@ const editMap = new Map<string, string[]>();
 storage.ignore ??= { users: [], bots: false, ownMessages: false };
 
 const DELETED_TEXT = "This message was deleted";
-const BULK_DELETED_TEXT = (count: number) => `${count} messages were deleted`;
 
 function buildAutomodMessage(text: string, timestamp: string): string {
   return `${text} (${timestamp})`;
@@ -48,9 +47,11 @@ export default {
             if (!msg?.nonce || !msg?.channel_id) return;
 
             const currentUserId = getCurrentUserId();
-            const isOwnMessage = msg.author?.id === currentUserId || (storage.ignore?.ownMessages && isOwnMessage);
+            const isOwnMessage =
+              msg.author?.id === currentUserId ||
+              (storage.ignore?.ownMessages && msg.author?.id === currentUserId);
 
-            // Completely ignore nonce manipulation for your own outgoing messages
+            // Ignore nonce manipulation for your own outgoing messages to prevent duplicates
             if (isOwnMessage) return;
 
             const existing = MessageStore?.getMessage(msg.channel_id, msg.nonce);
@@ -130,8 +131,12 @@ export default {
           if (!event?.ids?.length || !event?.channelId) return;
 
           const currentUserId = getCurrentUserId();
-          let count = 0;
+          const time = moment().format("HH:mm:ss");
+          const automodMessage = buildAutomodMessage(DELETED_TEXT, time);
 
+          let validCount = 0;
+
+          // Dispatch an Automod error payload for EACH deleted message ID in the bulk list
           for (const id of event.ids) {
             const msg = MessageStore?.getMessage(event.channelId, id) || deletedCache.get(id);
             if (!msg) continue;
@@ -140,29 +145,32 @@ export default {
             if (storage.ignore?.ownMessages && msg.author?.id === currentUserId) continue;
 
             if (!deletedCache.has(id)) {
-              deletedCache.set(id, { ...msg, deletedAt: moment().format("HH:mm:ss") });
+              deletedCache.set(id, { ...msg, deletedAt: time });
             }
-            count++;
-          }
-          if (count === 0) return;
 
-          const time = moment().format("HH:mm:ss");
-          const automodMessage = buildAutomodMessage(BULK_DELETED_TEXT(count), time);
+            validCount++;
 
-          args[0] = {
-            type: "MESSAGE_EDIT_FAILED_AUTOMOD",
-            messageData: {
-              type: 1,
-              message: {
-                channelId: event.channelId,
-                messageId: event.ids[0],
+            // Trigger red automod state individually for each message in the bulk payload
+            FluxDispatcher.dispatch({
+              type: "MESSAGE_EDIT_FAILED_AUTOMOD",
+              messageData: {
+                type: 1,
+                message: {
+                  channelId: event.channelId,
+                  messageId: id,
+                },
               },
-            },
-            errorResponseBody: {
-              code: 200000,
-              message: automodMessage,
-            },
-          };
+              errorResponseBody: {
+                code: 200000,
+                message: automodMessage,
+              },
+            });
+          }
+
+          // Cancel original bulk delete event so Discord doesn't purge rows from store
+          if (validCount > 0) {
+            args[0] = { type: "NOOP" };
+          }
         })
       );
 
@@ -208,7 +216,9 @@ export default {
 
   onUnload() {
     for (const unpatch of patches) {
-      try { unpatch(); } catch (_) {}
+      try {
+        unpatch();
+      } catch (_) {}
     }
     patches.length = 0;
     deletedCache.clear();
