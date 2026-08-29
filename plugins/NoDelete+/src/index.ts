@@ -12,7 +12,7 @@ let MessageStore: any;
 let AuthStore: any;
 const patches: (() => void)[] = [];
 
-// Persistent cache for deleted messages, embeds, and attachments
+// Persistent cache for deleted messages, components, embeds, and attachments
 const deletedCache = new Map<string, any>();
 const editMap = new Map<string, string[]>();
 
@@ -22,6 +22,20 @@ const DELETED_TEXT = "This message was deleted";
 
 function buildAutomodMessage(text: string, timestamp: string): string {
   return `${text} (${timestamp})`;
+}
+
+// Deep clone helper for components, embeds, and raw payload structures
+function cloneSnapshot(msg: any) {
+  if (!msg) return null;
+  return {
+    ...msg,
+    content: msg.content || "",
+    embeds: Array.isArray(msg.embeds) ? JSON.parse(JSON.stringify(msg.embeds)) : [],
+    components: Array.isArray(msg.components) ? JSON.parse(JSON.stringify(msg.components)) : [],
+    attachments: Array.isArray(msg.attachments) ? JSON.parse(JSON.stringify(msg.attachments)) : [],
+    flags: msg.flags || 0,
+    deletedAt: msg.deletedAt || moment().format("HH:mm:ss"),
+  };
 }
 
 export default {
@@ -47,39 +61,25 @@ export default {
             if (!msg?.nonce || !msg?.channel_id) return;
 
             const currentUserId = getCurrentUserId();
-            const isOwnMessage = msg.author?.id === currentUserId;
-
-            if (isOwnMessage) return;
+            if (msg.author?.id === currentUserId) return;
 
             const existing = MessageStore?.getMessage(msg.channel_id, msg.nonce);
             if (existing && existing.id !== msg.id) {
               if (!deletedCache.has(existing.id)) {
-                deletedCache.set(existing.id, {
-                  ...existing,
-                  content: existing.content,
-                  embeds: existing.embeds ? [...existing.embeds] : [],
-                  attachments: existing.attachments ? [...existing.attachments] : [],
-                  deletedAt: moment().format("HH:mm:ss"),
-                });
+                deletedCache.set(existing.id, cloneSnapshot(existing));
               }
               delete msg.nonce;
             }
           }
 
-          // Catch local delete events and snapshot full content, embeds & attachments
+          // Catch local delete events and snapshot full state
           if (event.type === "MESSAGE_DELETE") {
             const { channelId, id, mlDeleted } = event;
             if (!id || !channelId) return;
 
             const existing = MessageStore?.getMessage(channelId, id);
             if (existing && !deletedCache.has(id)) {
-              deletedCache.set(id, {
-                ...existing,
-                content: existing.content,
-                embeds: existing.embeds ? [...existing.embeds] : [],
-                attachments: existing.attachments ? [...existing.attachments] : [],
-                deletedAt: moment().format("HH:mm:ss"),
-              });
+              deletedCache.set(id, cloneSnapshot(existing));
             }
 
             if (mlDeleted) delete event.mlDeleted;
@@ -87,7 +87,7 @@ export default {
         })
       );
 
-      // ── 2. SINGLE MESSAGE DELETE HANDLER (FIXED FOR MANUAL DELETES) ──
+      // ── 2. SINGLE MESSAGE DELETE HANDLER (LEGACY EMBEDS + V2 COMPONENTS) ──
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -95,7 +95,7 @@ export default {
           if (!event?.id || !event?.channelId) return;
 
           const currentUserId = getCurrentUserId();
-          const cachedMsg = deletedCache.get(event.id) || MessageStore?.getMessage(event.channelId, event.id);
+          const cachedMsg = MessageStore?.getMessage(event.channelId, event.id) || deletedCache.get(event.id);
 
           if (!cachedMsg) return;
           if (storage.ignore?.users?.includes(cachedMsg.author?.id)) return;
@@ -103,20 +103,14 @@ export default {
           if (storage.ignore?.ownMessages && cachedMsg.author?.id === currentUserId) return;
 
           if (!deletedCache.has(event.id)) {
-            deletedCache.set(event.id, {
-              ...cachedMsg,
-              content: cachedMsg.content,
-              embeds: cachedMsg.embeds ? [...cachedMsg.embeds] : [],
-              attachments: cachedMsg.attachments ? [...cachedMsg.attachments] : [],
-              deletedAt: moment().format("HH:mm:ss"),
-            });
+            deletedCache.set(event.id, cloneSnapshot(cachedMsg));
           }
 
           const snapshot = deletedCache.get(event.id);
           const time = snapshot?.deletedAt || moment().format("HH:mm:ss");
           const automodMessage = buildAutomodMessage(DELETED_TEXT, time);
 
-          // Inject full preserved message properties back into the Automod store update
+          // Force full re-hydration of both components AND legacy embeds
           args[0] = {
             type: "MESSAGE_EDIT_FAILED_AUTOMOD",
             messageData: {
@@ -127,7 +121,9 @@ export default {
                 messageId: event.id,
                 content: snapshot?.content || "",
                 embeds: snapshot?.embeds || [],
+                components: snapshot?.components || [],
                 attachments: snapshot?.attachments || [],
+                flags: snapshot?.flags || 0,
               },
             },
             errorResponseBody: {
@@ -138,7 +134,7 @@ export default {
         })
       );
 
-      // ── 3. BULK DELETE HANDLER (WITH FULL RE-HYDRATION) ──
+      // ── 3. BULK DELETE HANDLER ──
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -152,20 +148,14 @@ export default {
           let validCount = 0;
 
           for (const id of event.ids) {
-            const cachedMsg = deletedCache.get(id) || MessageStore?.getMessage(event.channelId, id);
+            const cachedMsg = MessageStore?.getMessage(event.channelId, id) || deletedCache.get(id);
             if (!cachedMsg) continue;
             if (storage.ignore?.users?.includes(cachedMsg.author?.id)) continue;
             if (storage.ignore?.bots && cachedMsg.author?.bot) continue;
             if (storage.ignore?.ownMessages && cachedMsg.author?.id === currentUserId) continue;
 
             if (!deletedCache.has(id)) {
-              deletedCache.set(id, {
-                ...cachedMsg,
-                content: cachedMsg.content,
-                embeds: cachedMsg.embeds ? [...cachedMsg.embeds] : [],
-                attachments: cachedMsg.attachments ? [...cachedMsg.attachments] : [],
-                deletedAt: time,
-              });
+              deletedCache.set(id, cloneSnapshot({ ...cachedMsg, deletedAt: time }));
             }
 
             const snapshot = deletedCache.get(id);
@@ -181,7 +171,9 @@ export default {
                   messageId: id,
                   content: snapshot?.content || "",
                   embeds: snapshot?.embeds || [],
+                  components: snapshot?.components || [],
                   attachments: snapshot?.attachments || [],
+                  flags: snapshot?.flags || 0,
                 },
               },
               errorResponseBody: {
@@ -197,7 +189,7 @@ export default {
         })
       );
 
-      // ── 4. EDITS & EMBED UPDATES ──
+      // ── 4. EDITS & EMBED/COMPONENT PRESERVATION ──
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -214,9 +206,14 @@ export default {
 
           const oldMsg = MessageStore?.getMessage(newMsg.channel_id, newMsg.id) || deletedCache.get(newMsg.id);
 
-          // Restore embeds if suppressed or removed via edit
+          // Restore legacy embeds if stripped by edit
           if (oldMsg && oldMsg.embeds?.length && !newMsg.embeds?.length) {
-            newMsg.embeds = [...oldMsg.embeds];
+            newMsg.embeds = JSON.parse(JSON.stringify(oldMsg.embeds));
+          }
+
+          // Restore components if stripped by edit
+          if (oldMsg && oldMsg.components?.length && !newMsg.components?.length) {
+            newMsg.components = JSON.parse(JSON.stringify(oldMsg.components));
           }
 
           if (!newMsg.content || newMsg.content.trim() === "") return;
