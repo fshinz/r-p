@@ -1,33 +1,31 @@
-// index.ts — merged, embeds/edits only, no cloudSync, no inline-reinsertion, no per-row edit history overlay
 import { findByStoreName, findByProps } from "@vendetta/metro";
 import { FluxDispatcher, moment } from "@vendetta/metro/common";
 import { storage } from "@vendetta/plugin";
+import { before as patchBefore } from "@vendetta/patcher";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import { showToast } from "@vendetta/ui/toasts";
 import Settings from "./settings";
 import { patchContextMenu } from "./patches/contextMenu";
+import { patchEditStyling } from "./patches/editStyling";
+import { addEmbedLogEntry, snapshotForLog } from "./lib/embedLog";
 
 let MessageStore: any;
 let AuthStore: any;
-const cleanups: (() => void)[] = [];
+const patches: (() => void)[] = [];
 
-// Only a shadow copy of recent messages, capped, so deletes/edits can be reconstructed.
-// No cloud sync, no inline reinsertion into ChannelMessages, no persistent editMap growth.
-const MAX_TRACKED = 500;
-const shadow = new Map<string, any>();
+// Persistent cache for deleted messages, components, embeds, and attachments
+const deletedCache = new Map<string, any>();
+const editMap = new Map<string, string[]>();
 
 storage.ignore ??= { users: [], bots: false, ownMessages: false };
 
 const DELETED_TEXT = "This message was deleted";
 
-function evictOldest(map: Map<string, any>, max: number) {
-  while (map.size > max) {
-    const k = map.keys().next().value;
-    if (k === undefined) break;
-    map.delete(k);
-  }
+function buildAutomodMessage(text: string, timestamp: string): string {
+  return `${text} (${timestamp})`;
 }
 
+// Deep clone helper for components, embeds, and raw payload structures
 function cloneSnapshot(msg: any) {
   if (!msg) return null;
   return {
@@ -41,18 +39,6 @@ function cloneSnapshot(msg: any) {
   };
 }
 
-function buildAutomodMessage(text: string, timestamp: string) {
-  return `${text} (${timestamp})`;
-}
-
-function isIgnored(author: any, currentUserId: string) {
-  if (!author) return false;
-  if (storage.ignore?.users?.includes(author.id)) return true;
-  if (storage.ignore?.bots && author.bot) return true;
-  if (storage.ignore?.ownMessages && author.id === currentUserId) return true;
-  return false;
-}
-
 export default {
   onLoad() {
     try {
@@ -64,68 +50,78 @@ export default {
         AuthStore?.getId?.() ||
         MessageStore?.getCurrentUser?.()?.id;
 
-      // Cheap: Flux only calls us for these exact types, not every action in the app.
-      const onCreate = (event: any) => {
-        const msg = event?.message;
-        if (!msg?.id) return;
-        shadow.set(msg.id, msg);
-        evictOldest(shadow, MAX_TRACKED);
-      };
+      // 1. CATCH NONCE REPLACEMENTS, DELETIONS abd FULL SNAPSHOTS
+      patches.push(
+        patchBefore("dispatch", FluxDispatcher, (args) => {
+          const event = args[0];
+          if (!event?.type) return;
 
-      const onDelete = (event: any) => {
-        const { channelId, id } = event;
-        if (!id || !channelId) return;
+          // Catch incoming messages attempting nonce overwrites
+          if (event.type === "MESSAGE_CREATE") {
+            const msg = event.message;
+            if (!msg?.nonce || !msg?.channel_id) return;
 
-        const currentUserId = getCurrentUserId();
-        const cached = MessageStore?.getMessage(channelId, id) || shadow.get(id);
-        if (!cached) return;
-        if (isIgnored(cached.author, currentUserId)) return;
+            const currentUserId = getCurrentUserId();
+            if (msg.author?.id === currentUserId) return;
 
-        const snapshot = cloneSnapshot(cached);
-        shadow.delete(id);
+            const existing = MessageStore?.getMessage(msg.channel_id, msg.nonce);
+            if (existing && existing.id !== msg.id) {
+              if (!deletedCache.has(existing.id)) {
+                deletedCache.set(existing.id, cloneSnapshot(existing));
+              }
+              delete msg.nonce;
+            }
+          }
 
-        const time = snapshot?.deletedAt || moment().format("HH:mm:ss");
-        FluxDispatcher.dispatch({
-          type: "MESSAGE_EDIT_FAILED_AUTOMOD",
-          messageData: {
-            type: 1,
-            message: {
-              ...snapshot,
-              channelId,
-              messageId: id,
-              content: snapshot?.content || "",
-              embeds: snapshot?.embeds || [],
-              components: snapshot?.components || [],
-              attachments: snapshot?.attachments || [],
-              flags: snapshot?.flags || 0,
-            },
-          },
-          errorResponseBody: { code: 200000, message: buildAutomodMessage(DELETED_TEXT, time) },
-        });
-      };
+          // Catch local delete events and snapshot full state
+          if (event.type === "MESSAGE_DELETE") {
+            const { channelId, id, mlDeleted } = event;
+            if (!id || !channelId) return;
 
-      const onBulkDelete = (event: any) => {
-        const { channelId, ids } = event;
-        if (!channelId || !Array.isArray(ids)) return;
-        const currentUserId = getCurrentUserId();
-        const time = moment().format("HH:mm:ss");
+            const existing = MessageStore?.getMessage(channelId, id);
+            if (existing && !deletedCache.has(id)) {
+              deletedCache.set(id, cloneSnapshot(existing));
+            }
 
-        for (const id of ids) {
-          const cached = MessageStore?.getMessage(channelId, id) || shadow.get(id);
-          if (!cached) continue;
-          if (isIgnored(cached.author, currentUserId)) continue;
+            if (mlDeleted) delete event.mlDeleted;
+          }
+        })
+      );
 
-          const snapshot = cloneSnapshot({ ...cached, deletedAt: time });
-          shadow.delete(id);
+      // 2. SINGLE MESSAGE DELETE HANDLER (LEGACY EMBEDS and V2 COMPONENTS)
+      patches.push(
+        patchBefore("dispatch", FluxDispatcher, (args) => {
+          const event = args[0];
+          if (event?.type !== "MESSAGE_DELETE") return;
+          if (!event?.id || !event?.channelId) return;
 
-          FluxDispatcher.dispatch({
+          const currentUserId = getCurrentUserId();
+          const cachedMsg = MessageStore?.getMessage(event.channelId, event.id) || deletedCache.get(event.id);
+
+          if (!cachedMsg) return;
+          if (storage.ignore?.users?.includes(cachedMsg.author?.id)) return;
+          if (storage.ignore?.bots && cachedMsg.author?.bot) return;
+          if (storage.ignore?.ownMessages && cachedMsg.author?.id === currentUserId) return;
+
+          if (!deletedCache.has(event.id)) {
+            deletedCache.set(event.id, cloneSnapshot(cachedMsg));
+          }
+
+          const snapshot = deletedCache.get(event.id);
+          addEmbedLogEntry(snapshotForLog(snapshot, "deleted"));
+
+          const time = snapshot?.deletedAt || moment().format("HH:mm:ss");
+          const automodMessage = buildAutomodMessage(DELETED_TEXT, time);
+
+          // Force full rehydration of both components AND legacy embeds
+          args[0] = {
             type: "MESSAGE_EDIT_FAILED_AUTOMOD",
             messageData: {
               type: 1,
               message: {
                 ...snapshot,
-                channelId,
-                messageId: id,
+                channelId: event.channelId,
+                messageId: event.id,
                 content: snapshot?.content || "",
                 embeds: snapshot?.embeds || [],
                 components: snapshot?.components || [],
@@ -133,45 +129,113 @@ export default {
                 flags: snapshot?.flags || 0,
               },
             },
-            errorResponseBody: { code: 200000, message: buildAutomodMessage(DELETED_TEXT, time) },
-          });
-        }
-      };
-
-      // Edit handling: only restore stripped embeds/components. No history overlay, no row patching.
-      const onUpdate = (event: any) => {
-        const newMsg = event?.message;
-        if (!newMsg?.id) return;
-
-        const oldMsg = shadow.get(newMsg.id);
-        shadow.set(newMsg.id, newMsg);
-        evictOldest(shadow, MAX_TRACKED);
-        if (!oldMsg) return;
-
-        const currentUserId = getCurrentUserId();
-        if (isIgnored(newMsg.author, currentUserId)) return;
-
-        if (oldMsg.embeds?.length && !newMsg.embeds?.length) {
-          newMsg.embeds = JSON.parse(JSON.stringify(oldMsg.embeds));
-        }
-        if (oldMsg.components?.length && !newMsg.components?.length) {
-          newMsg.components = JSON.parse(JSON.stringify(oldMsg.components));
-        }
-      };
-
-      FluxDispatcher.subscribe("MESSAGE_CREATE", onCreate);
-      FluxDispatcher.subscribe("MESSAGE_DELETE", onDelete);
-      FluxDispatcher.subscribe("MESSAGE_DELETE_BULK", onBulkDelete);
-      FluxDispatcher.subscribe("MESSAGE_UPDATE", onUpdate);
-
-      cleanups.push(
-        () => FluxDispatcher.unsubscribe("MESSAGE_CREATE", onCreate),
-        () => FluxDispatcher.unsubscribe("MESSAGE_DELETE", onDelete),
-        () => FluxDispatcher.unsubscribe("MESSAGE_DELETE_BULK", onBulkDelete),
-        () => FluxDispatcher.unsubscribe("MESSAGE_UPDATE", onUpdate),
+            errorResponseBody: {
+              code: 200000,
+              message: automodMessage,
+            },
+          };
+        })
       );
 
-      cleanups.push(patchContextMenu());
+      // 3.BULK DELETE HANDLER
+      patches.push(
+        patchBefore("dispatch", FluxDispatcher, (args) => {
+          const event = args[0];
+          if (event?.type !== "MESSAGE_DELETE_BULK") return;
+          if (!event?.ids?.length || !event?.channelId) return;
+
+          const currentUserId = getCurrentUserId();
+          const time = moment().format("HH:mm:ss");
+          const automodMessage = buildAutomodMessage(DELETED_TEXT, time);
+
+          let validCount = 0;
+
+          for (const id of event.ids) {
+            const cachedMsg = MessageStore?.getMessage(event.channelId, id) || deletedCache.get(id);
+            if (!cachedMsg) continue;
+            if (storage.ignore?.users?.includes(cachedMsg.author?.id)) continue;
+            if (storage.ignore?.bots && cachedMsg.author?.bot) continue;
+            if (storage.ignore?.ownMessages && cachedMsg.author?.id === currentUserId) continue;
+
+            if (!deletedCache.has(id)) {
+              deletedCache.set(id, cloneSnapshot({ ...cachedMsg, deletedAt: time }));
+            }
+
+            const snapshot = deletedCache.get(id);
+            addEmbedLogEntry(snapshotForLog(snapshot, "deleted"));
+            validCount++;
+
+            FluxDispatcher.dispatch({
+              type: "MESSAGE_EDIT_FAILED_AUTOMOD",
+              messageData: {
+                type: 1,
+                message: {
+                  ...snapshot,
+                  channelId: event.channelId,
+                  messageId: id,
+                  content: snapshot?.content || "",
+                  embeds: snapshot?.embeds || [],
+                  components: snapshot?.components || [],
+                  attachments: snapshot?.attachments || [],
+                  flags: snapshot?.flags || 0,
+                },
+              },
+              errorResponseBody: {
+                code: 200000,
+                message: automodMessage,
+              },
+            });
+          }
+
+          if (validCount > 0) {
+            args[0] = { type: "NOOP" };
+          }
+        })
+      );
+
+      //4. EDITS & EMBED/COMPONENT PRESERVATION
+      patches.push(
+        patchBefore("dispatch", FluxDispatcher, (args) => {
+          const event = args[0];
+          if (event?.type !== "MESSAGE_UPDATE") return;
+          if (!event?.message) return;
+
+          const newMsg = event.message;
+          if (!newMsg.id || !newMsg.channel_id) return;
+
+          const currentUserId = getCurrentUserId();
+          if (storage.ignore?.users?.includes(newMsg.author?.id)) return;
+          if (storage.ignore?.bots && newMsg.author?.bot) return;
+          if (storage.ignore?.ownMessages && newMsg.author?.id === currentUserId) return;
+
+          const oldMsg = MessageStore?.getMessage(newMsg.channel_id, newMsg.id) || deletedCache.get(newMsg.id);
+
+          // Restore legacy embeds if stripped by edit
+          if (oldMsg && oldMsg.embeds?.length && !newMsg.embeds?.length) {
+            newMsg.embeds = JSON.parse(JSON.stringify(oldMsg.embeds));
+          }
+
+          // Restore components if stripped by edit
+          if (oldMsg && oldMsg.components?.length && !newMsg.components?.length) {
+            newMsg.components = JSON.parse(JSON.stringify(oldMsg.components));
+          }
+
+          if (!newMsg.content || newMsg.content.trim() === "") return;
+          if (!oldMsg || !oldMsg.content || oldMsg.content === newMsg.content) return;
+
+          let history = editMap.get(newMsg.id) || [];
+          if (history.length === 0 || history[history.length - 1] !== oldMsg.content) {
+            history.push(oldMsg.content);
+          }
+          if (history.length > 5) history = history.slice(-5);
+          editMap.set(newMsg.id, history);
+
+          addEmbedLogEntry(snapshotForLog(newMsg, "edited", newMsg.content));
+        })
+      );
+
+      patches.push(patchEditStyling(editMap));
+      patches.push(patchContextMenu());
 
       showToast("Message Logger loaded", getAssetIDByName("Check"));
     } catch (e) {
@@ -181,11 +245,14 @@ export default {
   },
 
   onUnload() {
-    for (const fn of cleanups) {
-      try { fn(); } catch (_) {}
+    for (const unpatch of patches) {
+      try {
+        unpatch();
+      } catch (_) {}
     }
-    cleanups.length = 0;
-    shadow.clear();
+    patches.length = 0;
+    deletedCache.clear();
+    editMap.clear();
     showToast("Message Logger unloaded", getAssetIDByName("Check"));
   },
 
