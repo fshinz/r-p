@@ -11,7 +11,7 @@ function textNode(text: string) {
 function editedTagNode() {
   return {
     type: "link",
-    target: "usernameOnClick",
+    target: "edited",
     context: {
       username: 1,
       usernameOnClick: {
