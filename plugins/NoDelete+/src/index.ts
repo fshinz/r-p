@@ -9,6 +9,7 @@ import { patchContextMenu } from "./patches/contextMenu";
 import { patchEditStyling } from "./patches/editStyling";
 
 let MessageStore: any;
+let AuthStore: any;
 const patches: (() => void)[] = [];
 const deletedIds: string[] = [];
 
@@ -25,7 +26,38 @@ export default {
   onLoad() {
     try {
       MessageStore = findByStoreName("MessageStore");
-      const currentUserId = MessageStore?.getCurrentUser?.()?.id;
+      AuthStore = findByStoreName("AuthenticationStore") || findByProps("getToken");
+
+      const currentUserId = AuthStore?.getCurrentUser?.()?.id || MessageStore?.getCurrentUser?.()?.id;
+
+      // ── DETECT NONCE‑BASED REPLACEMENT (Silent Delete bypass) ──
+      patches.push(
+        patchBefore("dispatch", FluxDispatcher, (args) => {
+          const event = args[0];
+          if (event?.type !== "MESSAGE_CREATE") return;
+          const msg = event.message;
+          if (!msg?.nonce) return;
+
+          // Check if this nonce matches an existing message ID in the same channel
+          const existing = MessageStore?.getMessage(msg.channel_id, msg.nonce);
+          if (existing && existing.id !== msg.id) {
+            // This is a replacement attempt – log the original as deleted
+            // Prevent double-logging with the real delete later
+            if (!deletedIds.includes(existing.id)) {
+              deletedIds.push(existing.id);
+              // Dispatch a synthetic delete so our delete handler processes it
+              FluxDispatcher.dispatch({
+                type: "MESSAGE_DELETE",
+                id: existing.id,
+                channelId: msg.channel_id,
+                mlReplacement: true,
+              });
+            }
+            // Remove nonce to prevent further replacement attempts
+            delete msg.nonce;
+          }
+        })
+      );
 
       // ── SINGLE DELETE ──
       patches.push(
@@ -33,6 +65,9 @@ export default {
           const event = args[0];
           if (event?.type !== "MESSAGE_DELETE") return;
           if (!event?.id || !event?.channelId) return;
+
+          // Skip if this was already handled by our replacement detection
+          if (event.mlReplacement) return;
 
           const msg = MessageStore?.getMessage(event.channelId, event.id);
           if (!msg) return;
@@ -106,7 +141,7 @@ export default {
       );
 
       // ── EDITS: store history (up to 5 previous versions) ──
-      const editMap = new Map<string, string[]>(); // messageId -> array of previous contents (oldest first)
+      const editMap = new Map<string, string[]>();
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -124,13 +159,10 @@ export default {
 
           if (oldMsg.content === newMsg.content) return;
 
-          // Get existing history or create new array
           let history = editMap.get(newMsg.id) || [];
-          // Add old content to history (if not already the last one)
           if (history.length === 0 || history[history.length - 1] !== oldMsg.content) {
             history.push(oldMsg.content || "");
           }
-          // Keep only last 5
           if (history.length > 5) history = history.slice(-5);
           editMap.set(newMsg.id, history);
           setTimeout(() => editMap.delete(newMsg.id), 60000);
