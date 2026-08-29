@@ -13,20 +13,13 @@ let MessageStore: any;
 let AuthStore: any;
 const patches: (() => void)[] = [];
 
-// Lightweight in-memory caches (Bounded to prevent memory leaks)
+// Lightweight in-memory caches
 const deletedCache = new Map<string, any>();
 const editMap = new Map<string, string[]>();
 const MAX_CACHE_SIZE = 300;
 
 storage.ignore ??= { users: [], bots: false, ownMessages: false };
 
-const DELETED_TEXT = "This message was deleted";
-
-function buildAutomodMessage(text: string, timestamp: string): string {
-  return `${text} (${timestamp})`;
-}
-
-// Memory safety cleanup
 function enforceCacheLimit(map: Map<any, any>, max: number) {
   while (map.size > max) {
     const oldestKey = map.keys().next().value;
@@ -35,7 +28,6 @@ function enforceCacheLimit(map: Map<any, any>, max: number) {
   }
 }
 
-// Deep clone embeds, attachments, components, and stickers accurately
 function cloneSnapshot(msg: any) {
   if (!msg) return null;
   return {
@@ -61,7 +53,7 @@ export default {
         AuthStore?.getId?.() ||
         MessageStore?.getCurrentUser?.()?.id;
 
-      // 1. CACHE MESSAGES BEFORE THEY DISAPPEAR (Captures Embeds & Attachments)
+      // 1. Cache incoming messages to preserve embeds/attachments
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -70,8 +62,6 @@ export default {
           if (event.type === "MESSAGE_CREATE") {
             const msg = event.message;
             if (!msg?.id) return;
-            
-            // Fast cache message for potential deletion recovery
             deletedCache.set(msg.id, cloneSnapshot(msg));
             enforceCacheLimit(deletedCache, MAX_CACHE_SIZE);
           }
@@ -79,7 +69,6 @@ export default {
           if (event.type === "MESSAGE_DELETE") {
             const { channelId, id } = event;
             if (!id || !channelId) return;
-
             const existing = MessageStore?.getMessage(channelId, id);
             if (existing && !deletedCache.has(id)) {
               deletedCache.set(id, cloneSnapshot(existing));
@@ -89,7 +78,7 @@ export default {
         })
       );
 
-      // 2. SINGLE DELETION INTERCEPTOR
+      // 2. Intercept Deletions safely without dispatching auto-mod error blocks
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -108,35 +97,12 @@ export default {
             deletedCache.set(event.id, cloneSnapshot(cachedMsg));
           }
 
-          const snapshot = deletedCache.get(event.id);
-          const time = snapshot?.deletedAt || moment().format("HH:mm:ss");
-
-          // Renders via standard native AutoMod banner - ultra fast, zero UI lag
-          args[0] = {
-            type: "MESSAGE_EDIT_FAILED_AUTOMOD",
-            messageData: {
-              type: 1,
-              message: {
-                ...snapshot,
-                channelId: event.channelId,
-                messageId: event.id,
-                content: snapshot?.content || "",
-                embeds: snapshot?.embeds || [],
-                attachments: snapshot?.attachments || [],
-                components: snapshot?.components || [],
-                sticker_items: snapshot?.sticker_items || [],
-                flags: snapshot?.flags || 0,
-              },
-            },
-            errorResponseBody: {
-              code: 200000,
-              message: buildAutomodMessage(DELETED_TEXT, time),
-            },
-          };
+          // Prevent Discord from removing the message row entirely
+          args[0] = { type: "NOOP" };
         })
       );
 
-      // 3. BULK DELETION INTERCEPTOR
+      // 3. Intercept Bulk Deletes safely
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -145,8 +111,6 @@ export default {
 
           const currentUserId = getCurrentUserId();
           const time = moment().format("HH:mm:ss");
-
-          let validCount = 0;
 
           for (const id of event.ids) {
             const cachedMsg = MessageStore?.getMessage(event.channelId, id) || deletedCache.get(id);
@@ -158,39 +122,13 @@ export default {
             if (!deletedCache.has(id)) {
               deletedCache.set(id, cloneSnapshot({ ...cachedMsg, deletedAt: time }));
             }
-
-            const snapshot = deletedCache.get(id);
-            validCount++;
-
-            FluxDispatcher.dispatch({
-              type: "MESSAGE_EDIT_FAILED_AUTOMOD",
-              messageData: {
-                type: 1,
-                message: {
-                  ...snapshot,
-                  channelId: event.channelId,
-                  messageId: id,
-                  content: snapshot?.content || "",
-                  embeds: snapshot?.embeds || [],
-                  attachments: snapshot?.attachments || [],
-                  components: snapshot?.components || [],
-                  flags: snapshot?.flags || 0,
-                },
-              },
-              errorResponseBody: {
-                code: 200000,
-                message: buildAutomodMessage(DELETED_TEXT, time),
-              },
-            });
           }
 
-          if (validCount > 0) {
-            args[0] = { type: "NOOP" };
-          }
+          args[0] = { type: "NOOP" };
         })
       );
 
-      // 4. EDITS PRESERVATION (Preserves original embeds & attachments on edit updates)
+      // 4. Preserve Embeds on Edit Updates
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -207,7 +145,6 @@ export default {
 
           const oldMsg = MessageStore?.getMessage(newMsg.channel_id, newMsg.id) || deletedCache.get(newMsg.id);
 
-          // Preserve embeds and attachments if Discord tried to strip them during edit
           if (oldMsg) {
             if (oldMsg.embeds?.length && !newMsg.embeds?.length) {
               newMsg.embeds = JSON.parse(JSON.stringify(oldMsg.embeds));
