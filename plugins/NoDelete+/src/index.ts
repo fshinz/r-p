@@ -54,13 +54,12 @@ export default {
             if (storage.ignore?.users?.includes(msg.author?.id)) return;
             if (storage.ignore?.bots && msg.author?.bot) return;
 
-            // Store the original message content for row styling
             deletedMessages.set(event.id, {
               content: formatMessageContent(msg),
               author: msg.author?.username || "Unknown",
               timestamp: new Date().toLocaleTimeString(),
             });
-            // Remove after a short delay to keep map small (cleanup)
+            // Remove after a short delay to keep map small
             setTimeout(() => deletedMessages.delete(event.id), 60000);
             return;
           }
@@ -105,7 +104,7 @@ export default {
         })
       );
 
-      // 2. Patch row styling (red color & edit tags)
+      // 2. Patch row styling (red text & edit tags)
       patches.push(patchRowStyling(deletedMessages, editedMessages));
 
       // 3. Context menu for ignore
