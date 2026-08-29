@@ -26,25 +26,39 @@ function editedTagNode() {
   };
 }
 
-export function patchEditStyling(editMap: Map<string, { oldContent: string; newContent: string }>) {
+export function patchEditStyling(editMap: Map<string, string[]>) {
   const cleanups: (() => void)[] = [];
 
   function handleRow(row: any) {
     const message = row?.message;
     if (!message?.id) return;
 
-    const edit = editMap.get(message.id);
-    if (!edit) return;
+    const history = editMap.get(message.id);
+    if (!history || history.length === 0) return;
     if (message.__loggerEditApplied) return;
     message.__loggerEditApplied = true;
 
     const nodes: any[] = [];
-    nodes.push(textNode(edit.oldContent || "(empty)"));
-    nodes.push(editedTagNode());
-    nodes.push(textNode("\n↓\n"));
-    nodes.push(textNode(edit.newContent || "(empty)"));
-    nodes.push(editedTagNode());
-    // No timestamp – as requested
+    // Show each previous version with (edited) tag and arrow
+    for (let i = 0; i < history.length; i++) {
+      nodes.push(textNode(history[i] || "(empty)"));
+      nodes.push(editedTagNode());
+      if (i < history.length - 1) {
+        nodes.push(textNode("\n↓\n"));
+      }
+    }
+    // Finally show current content (without (edited) tag because it's the final version)
+    // The current content is already in the message; we could just keep it, but we need to preserve its original nodes.
+    // We'll append the current content after the history.
+    const currentContent = Array.isArray(message.content) ? message.content : [textNode(message.content || "")];
+    // Add a separator if there's history
+    if (history.length > 0) {
+      nodes.push(textNode("\n↓\n"));
+    }
+    // Push current content nodes
+    for (const node of currentContent) {
+      nodes.push(node);
+    }
     message.content = nodes;
   }
 
@@ -61,7 +75,6 @@ export function patchEditStyling(editMap: Map<string, { oldContent: string; newC
       })
     );
   } else {
-    // Fallback: RowManager
     const RowManager = findByProps("RowManager") || findByName("RowManager");
     if (RowManager?.prototype?.generate) {
       cleanups.push(
