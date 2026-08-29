@@ -12,7 +12,7 @@ let MessageStore: any;
 let AuthStore: any;
 const patches: (() => void)[] = [];
 
-// Persistent cache for messages targeted by SilentDelete nonce overrides
+// Cache for deleted messages and full embed snapshots
 const deletedCache = new Map<string, any>();
 const editMap = new Map<string, string[]>();
 
@@ -35,7 +35,7 @@ export default {
         AuthStore?.getId?.() ||
         MessageStore?.getCurrentUser?.()?.id;
 
-      // ── 1. CATCH NONCE-BASED REPLACEMENTS & EPHEMERAL SILENT DELETES ──
+      // ── 1. CATCH NONCE REPLACEMENTS, DELETIONS & EMBED SNAPSHOTS ──
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -47,29 +47,24 @@ export default {
             if (!msg?.nonce || !msg?.channel_id) return;
 
             const currentUserId = getCurrentUserId();
-            const isOwnMessage =
-              msg.author?.id === currentUserId ||
-              (storage.ignore?.ownMessages && msg.author?.id === currentUserId);
+            const isOwnMessage = msg.author?.id === currentUserId;
 
-            // Ignore nonce manipulation for your own outgoing messages to prevent duplicates
             if (isOwnMessage) return;
 
             const existing = MessageStore?.getMessage(msg.channel_id, msg.nonce);
             if (existing && existing.id !== msg.id) {
-              // Cache target message state before it gets overwritten in store
               if (!deletedCache.has(existing.id)) {
                 deletedCache.set(existing.id, {
                   ...existing,
+                  embeds: existing.embeds ? [...existing.embeds] : [],
                   deletedAt: moment().format("HH:mm:ss"),
                 });
               }
-
-              // Disassociate nonce directly to prevent client-side row replacement
               delete msg.nonce;
             }
           }
 
-          // Catch local bypasses attempting custom flags
+          // Catch local delete events and snapshot full embeds
           if (event.type === "MESSAGE_DELETE") {
             const { channelId, id, mlDeleted } = event;
             if (!id || !channelId) return;
@@ -78,6 +73,7 @@ export default {
             if (existing && !deletedCache.has(id)) {
               deletedCache.set(id, {
                 ...existing,
+                embeds: existing.embeds ? [...existing.embeds] : [],
                 deletedAt: moment().format("HH:mm:ss"),
               });
             }
@@ -102,10 +98,18 @@ export default {
           if (storage.ignore?.bots && msg.author?.bot) return;
           if (storage.ignore?.ownMessages && msg.author?.id === currentUserId) return;
 
+          // Preserve existing embeds on target message
+          if (!deletedCache.has(event.id)) {
+            deletedCache.set(event.id, {
+              ...msg,
+              embeds: msg.embeds ? [...msg.embeds] : [],
+              deletedAt: moment().format("HH:mm:ss"),
+            });
+          }
+
           const time = deletedCache.get(event.id)?.deletedAt || moment().format("HH:mm:ss");
           const automodMessage = buildAutomodMessage(DELETED_TEXT, time);
 
-          // Force store to render Automod tombstone payload
           args[0] = {
             type: "MESSAGE_EDIT_FAILED_AUTOMOD",
             messageData: {
@@ -123,7 +127,7 @@ export default {
         })
       );
 
-      // ── 3. BULK DELETE HANDLER ──
+      // ── 3. BULK DELETE HANDLER (WITH EMBED PRESERVATION) ──
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -136,7 +140,6 @@ export default {
 
           let validCount = 0;
 
-          // Dispatch an Automod error payload for EACH deleted message ID in the bulk list
           for (const id of event.ids) {
             const msg = MessageStore?.getMessage(event.channelId, id) || deletedCache.get(id);
             if (!msg) continue;
@@ -144,13 +147,17 @@ export default {
             if (storage.ignore?.bots && msg.author?.bot) continue;
             if (storage.ignore?.ownMessages && msg.author?.id === currentUserId) continue;
 
+            // Preserve embeds across all bulk-deleted items
             if (!deletedCache.has(id)) {
-              deletedCache.set(id, { ...msg, deletedAt: time });
+              deletedCache.set(id, {
+                ...msg,
+                embeds: msg.embeds ? [...msg.embeds] : [],
+                deletedAt: time,
+              });
             }
 
             validCount++;
 
-            // Trigger red automod state individually for each message in the bulk payload
             FluxDispatcher.dispatch({
               type: "MESSAGE_EDIT_FAILED_AUTOMOD",
               messageData: {
@@ -167,14 +174,13 @@ export default {
             });
           }
 
-          // Cancel original bulk delete event so Discord doesn't purge rows from store
           if (validCount > 0) {
             args[0] = { type: "NOOP" };
           }
         })
       );
 
-      // ── 4. EDITS: PRESERVE HISTORY ──
+      // ── 4. EDITS & EMBED UPDATES ──
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -184,15 +190,19 @@ export default {
           const newMsg = event.message;
           if (!newMsg.id || !newMsg.channel_id) return;
 
-          // Ignore blank edit triggers used by SilentEdit payloads
-          if (!newMsg.content || newMsg.content.trim() === "") return;
-
           const currentUserId = getCurrentUserId();
           if (storage.ignore?.users?.includes(newMsg.author?.id)) return;
           if (storage.ignore?.bots && newMsg.author?.bot) return;
           if (storage.ignore?.ownMessages && newMsg.author?.id === currentUserId) return;
 
           const oldMsg = MessageStore?.getMessage(newMsg.channel_id, newMsg.id) || deletedCache.get(newMsg.id);
+          
+          // If embed array changed or got suppressed/removed by edit
+          if (oldMsg && oldMsg.embeds?.length && !newMsg.embeds?.length) {
+            newMsg.embeds = [...oldMsg.embeds];
+          }
+
+          if (!newMsg.content || newMsg.content.trim() === "") return;
           if (!oldMsg || !oldMsg.content || oldMsg.content === newMsg.content) return;
 
           let history = editMap.get(newMsg.id) || [];
