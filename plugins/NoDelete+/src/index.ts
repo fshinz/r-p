@@ -1,23 +1,22 @@
 import { findByStoreName } from "@vendetta/metro";
-import { FluxDispatcher } from "@vendetta/metro/common";
+import { FluxDispatcher, moment } from "@vendetta/metro/common";
 import { storage } from "@vendetta/plugin";
 import { before as patchBefore } from "@vendetta/patcher";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import { showToast } from "@vendetta/ui/toasts";
 import Settings from "./settings";
 import { patchContextMenu } from "./patches/contextMenu";
-import { patchRowStyling } from "./patches/rowStyling";
 
 let MessageStore: any;
 const patches: (() => void)[] = [];
-
-export const deletedMessages = new Map<string, { content: string; author: string; timestamp: string }>();
-export const editedMessages = new Map<string, { oldContent: string; newContent: string; timestamp: string }>();
+const deletedIds: string[] = []; // prevent double‑logging
 
 storage.ignore ??= { users: [], bots: false };
 
+/** Convert embeds & attachments to readable text */
 function formatMessageContent(message: any): string {
   let content = message.content || "";
+
   if (message.embeds?.length) {
     for (const embed of message.embeds) {
       if (embed.title) content += `\n${embed.title}`;
@@ -27,14 +26,22 @@ function formatMessageContent(message: any): string {
           content += `\n${field.name}: ${field.value}`;
         }
       }
+      if (embed.url) content += `\n${embed.url}`;
     }
   }
+
   if (message.attachments?.length) {
     for (const att of message.attachments) {
       content += `\n📎 ${att.filename} (${Math.round(att.size / 1024)}KB)`;
     }
   }
+
   return content || "[Empty Message]";
+}
+
+/** Build a red‑quote system message with timestamp */
+function buildSystemMessage(content: string, timestamp: string): string {
+  return `> ${content.replace(/\n/g, "\n> ")}\n\n-# ${timestamp}`;
 }
 
 export default {
@@ -42,66 +49,130 @@ export default {
     try {
       MessageStore = findByStoreName("MessageStore");
 
+      // ── Single delete ──
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
-          if (event?.type === "MESSAGE_DELETE") {
-            if (!event?.id || !event?.channelId) return;
-            const msg = MessageStore?.getMessage(event.channelId, event.id);
-            if (!msg) return;
-            if (storage.ignore?.users?.includes(msg.author?.id)) return;
-            if (storage.ignore?.bots && msg.author?.bot) return;
+          if (event?.type !== "MESSAGE_DELETE") return;
+          if (!event?.id || !event?.channelId) return;
 
-            deletedMessages.set(event.id, {
-              content: formatMessageContent(msg),
-              author: msg.author?.username || "Unknown",
-              timestamp: new Date().toLocaleTimeString(),
-            });
-            setTimeout(() => deletedMessages.delete(event.id), 60000);
+          const msg = MessageStore?.getMessage(event.channelId, event.id);
+          if (!msg) return;
+          if (storage.ignore?.users?.includes(msg.author?.id)) return;
+          if (storage.ignore?.bots && msg.author?.bot) return;
+
+          // Prevent double‑logging
+          if (deletedIds.includes(event.id)) {
+            deletedIds.splice(deletedIds.indexOf(event.id), 1);
             return;
           }
+          deletedIds.push(event.id);
 
-          if (event?.type === "MESSAGE_DELETE_BULK") {
-            if (!event?.ids?.length || !event?.channelId) return;
-            for (const id of event.ids) {
-              const msg = MessageStore?.getMessage(event.channelId, id);
-              if (!msg) continue;
-              if (storage.ignore?.users?.includes(msg.author?.id)) continue;
-              if (storage.ignore?.bots && msg.author?.bot) continue;
-              deletedMessages.set(id, {
-                content: formatMessageContent(msg),
-                author: msg.author?.username || "Unknown",
-                timestamp: new Date().toLocaleTimeString(),
-              });
-              setTimeout(() => deletedMessages.delete(id), 60000);
-            }
-            return;
-          }
+          const content = formatMessageContent(msg);
+          const time = moment().format("HH:mm:ss");
 
-          if (event?.type === "MESSAGE_UPDATE") {
-            const newMsg = event?.message;
-            if (!newMsg?.id || !newMsg?.channel_id) return;
-            if (storage.ignore?.users?.includes(newMsg.author?.id)) return;
-            if (storage.ignore?.bots && newMsg.author?.bot) return;
-
-            const oldMsg = MessageStore?.getMessage(newMsg.channel_id, newMsg.id);
-            if (!oldMsg) return;
-            const oldContent = formatMessageContent(oldMsg);
-            const newContent = formatMessageContent(newMsg);
-            if (oldContent === newContent) return;
-
-            editedMessages.set(newMsg.id, {
-              oldContent,
-              newContent,
-              timestamp: new Date().toLocaleTimeString(),
-            });
-            setTimeout(() => editedMessages.delete(newMsg.id), 60000);
-            return;
-          }
+          args[0] = {
+            type: "MESSAGE_EDIT_FAILED_AUTOMOD",
+            messageData: {
+              type: 1,
+              message: {
+                channelId: event.channelId,
+                messageId: event.id,
+              },
+            },
+            errorResponseBody: {
+              code: 200000,
+              message: buildSystemMessage(content, time),
+            },
+          };
         })
       );
 
-      patches.push(patchRowStyling(deletedMessages, editedMessages));
+      // ── Bulk delete ──
+      patches.push(
+        patchBefore("dispatch", FluxDispatcher, (args) => {
+          const event = args[0];
+          if (event?.type !== "MESSAGE_DELETE_BULK") return;
+          if (!event?.ids?.length || !event?.channelId) return;
+
+          const messages: any[] = [];
+          for (const id of event.ids) {
+            const msg = MessageStore?.getMessage(event.channelId, id);
+            if (!msg) continue;
+            if (storage.ignore?.users?.includes(msg.author?.id)) continue;
+            if (storage.ignore?.bots && msg.author?.bot) continue;
+            messages.push(msg);
+          }
+          if (messages.length === 0) return;
+
+          // Build a combined list
+          let combined = `**${messages.length} messages deleted:**\n\n`;
+          for (const msg of messages) {
+            const author = msg.author?.username || "Unknown";
+            const content = formatMessageContent(msg);
+            combined += `**${author}**: ${content}\n`;
+          }
+
+          const time = moment().format("HH:mm:ss");
+          const firstId = messages[0]?.id || event.ids[0];
+
+          args[0] = {
+            type: "MESSAGE_EDIT_FAILED_AUTOMOD",
+            messageData: {
+              type: 1,
+              message: {
+                channelId: event.channelId,
+                messageId: firstId,
+              },
+            },
+            errorResponseBody: {
+              code: 200000,
+              message: buildSystemMessage(combined.trim(), time),
+            },
+          };
+        })
+      );
+
+      // ── Edit ──
+      patches.push(
+        patchBefore("dispatch", FluxDispatcher, (args) => {
+          const event = args[0];
+          if (event?.type !== "MESSAGE_UPDATE") return;
+          if (!event?.message) return;
+
+          const newMsg = event.message;
+          if (!newMsg.id || !newMsg.channel_id) return;
+          if (storage.ignore?.users?.includes(newMsg.author?.id)) return;
+          if (storage.ignore?.bots && newMsg.author?.bot) return;
+
+          const oldMsg = MessageStore?.getMessage(newMsg.channel_id, newMsg.id);
+          if (!oldMsg) return;
+
+          const oldContent = formatMessageContent(oldMsg);
+          const newContent = formatMessageContent(newMsg);
+          if (oldContent === newContent) return;
+
+          const time = moment().format("HH:mm:ss");
+          const editText = `**Before:**\n${oldContent}\n\n**After:**\n${newContent}`;
+
+          args[0] = {
+            type: "MESSAGE_EDIT_FAILED_AUTOMOD",
+            messageData: {
+              type: 1,
+              message: {
+                channelId: newMsg.channel_id,
+                messageId: newMsg.id,
+              },
+            },
+            errorResponseBody: {
+              code: 200000,
+              message: buildSystemMessage(editText, time),
+            },
+          };
+        })
+      );
+
+      // ── Context menu (ignore user) ──
       patches.push(patchContextMenu());
 
       showToast("Message Logger loaded", getAssetIDByName("Check"));
@@ -116,8 +187,7 @@ export default {
       try { unpatch(); } catch (_) {}
     }
     patches.length = 0;
-    deletedMessages.clear();
-    editedMessages.clear();
+    deletedIds.length = 0;
     showToast("Message Logger unloaded", getAssetIDByName("Check"));
   },
 
