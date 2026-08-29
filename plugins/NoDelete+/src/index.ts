@@ -12,7 +12,7 @@ let MessageStore: any;
 let AuthStore: any;
 const patches: (() => void)[] = [];
 
-// Local cache for messages targeted by SilentDelete nonce overrides
+// Persistent cache for messages targeted by SilentDelete nonce overrides
 const deletedCache = new Map<string, any>();
 const editMap = new Map<string, string[]>();
 
@@ -36,21 +36,20 @@ export default {
         AuthStore?.getId?.() ||
         MessageStore?.getCurrentUser?.()?.id;
 
-      // ── 1. ANTI-SILENTDELETE: CATCH NONCE OVERWRITES IMMEDIATELY ──
+      // ── 1. CATCH NONCE-BASED REPLACEMENTS & EPHEMERAL SILENT DELETES ──
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
           if (!event?.type) return;
 
-          // SilentDelete works by creating a new message whose nonce = target message ID
+          // Catch incoming messages attempting nonce overwrites
           if (event.type === "MESSAGE_CREATE") {
             const msg = event.message;
             if (!msg?.nonce || !msg?.channel_id) return;
 
-            // Check if a message with this nonce/ID already exists in store
             const existing = MessageStore?.getMessage(msg.channel_id, msg.nonce);
-            if (existing) {
-              // Cache original contents BEFORE Discord replaces it
+            if (existing && existing.id !== msg.id) {
+              // Cache target message state before it gets overwritten in store
               if (!deletedCache.has(existing.id)) {
                 deletedCache.set(existing.id, {
                   ...existing,
@@ -58,34 +57,37 @@ export default {
                 });
               }
 
-              // Purge duplicate rendering
-              setTimeout(() => {
-                FluxDispatcher.dispatch({
-                  type: "MESSAGE_DELETE",
-                  id: existing.id,
-                  channelId: msg.channel_id,
-                  isMlDuplicateCleanup: true,
-                });
-              }, 0);
-
-              // Neutralize nonce to stop silent overwrite
+              // Disassociate nonce directly to prevent client-side row replacement
               delete msg.nonce;
             }
+          }
+
+          // Catch local bypasses attempting custom flags
+          if (event.type === "MESSAGE_DELETE") {
+            const { channelId, id, mlDeleted } = event;
+            if (!id || !channelId) return;
+
+            const existing = MessageStore?.getMessage(channelId, id);
+            if (existing && !deletedCache.has(id)) {
+              deletedCache.set(id, {
+                ...existing,
+                deletedAt: moment().format("HH:mm:ss"),
+              });
+            }
+
+            if (mlDeleted) delete event.mlDeleted;
           }
         })
       );
 
-      // ── 2. HANDLE SINGLE DELETIONS ──
+      // ── 2. SINGLE MESSAGE DELETE HANDLER ──
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
           if (event?.type !== "MESSAGE_DELETE") return;
           if (!event?.id || !event?.channelId) return;
 
-          if (event.isMlDuplicateCleanup) return;
-
           const currentUserId = getCurrentUserId();
-          // Read from store, or fallback to our pre-cached SilentDelete map
           const msg = MessageStore?.getMessage(event.channelId, event.id) || deletedCache.get(event.id);
 
           if (!msg) return;
@@ -96,7 +98,7 @@ export default {
           const time = deletedCache.get(event.id)?.deletedAt || moment().format("HH:mm:ss");
           const automodMessage = buildAutomodMessage(DELETED_TEXT, time);
 
-          // Construct Automod tombstone
+          // Force store to render Automod tombstone payload
           args[0] = {
             type: "MESSAGE_EDIT_FAILED_AUTOMOD",
             messageData: {
@@ -104,7 +106,6 @@ export default {
               message: {
                 channelId: event.channelId,
                 messageId: event.id,
-                content: msg.content, // Preserve original text
               },
             },
             errorResponseBody: {
@@ -115,7 +116,7 @@ export default {
         })
       );
 
-      // ── 3. HANDLE BULK DELETIONS ──
+      // ── 3. BULK DELETE HANDLER ──
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -159,7 +160,7 @@ export default {
         })
       );
 
-      // ── 4. HANDLE EDITS & FILTER OUT SILENT EDIT PLACEHOLDERS ──
+      // ── 4. EDITS: PRESERVE HISTORY ──
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -169,8 +170,8 @@ export default {
           const newMsg = event.message;
           if (!newMsg.id || !newMsg.channel_id) return;
 
-          // Ignore blank/space edits used by SilentEdit/SilentDelete placeholders
-          if (!newMsg.content || newMsg.content.trim() === "" || newMsg.content === "** **") return;
+          // Ignore blank edit triggers used by SilentEdit payloads
+          if (!newMsg.content || newMsg.content.trim() === "") return;
 
           const currentUserId = getCurrentUserId();
           if (storage.ignore?.users?.includes(newMsg.author?.id)) return;
@@ -201,9 +202,7 @@ export default {
 
   onUnload() {
     for (const unpatch of patches) {
-      try {
-        unpatch();
-      } catch (_) {}
+      try { unpatch(); } catch (_) {}
     }
     patches.length = 0;
     deletedCache.clear();
