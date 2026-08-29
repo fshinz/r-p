@@ -1,13 +1,14 @@
-import { React, ReactNative } from "@vendetta/metro/common";
-import { Forms } from "@vendetta/ui/components";
+import React from "react";
 import { storage } from "@vendetta/plugin";
 import { useProxy } from "@vendetta/storage";
+import { findByStoreName } from "@vendetta/metro";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import { showToast } from "@vendetta/ui/toasts";
 import { showConfirmationAlert } from "@vendetta/ui/alerts";
-import { findByStoreName } from "@vendetta/metro";
+import { Forms } from "@vendetta/ui/components";
+import { ScrollView, Stack, TableRowGroup, TableSwitchRow } from "../lib/table";
 
-const { FormText, FormSection, FormRow, FormSwitchRow } = Forms;
+const { FormText, FormRow } = Forms;
 let UserStore: any;
 
 export default function Settings() {
@@ -15,7 +16,7 @@ export default function Settings() {
   useProxy(storage);
 
   storage.ignore ??= { users: [], bots: false, ownMessages: false };
-  const [users, setUsers] = React.useState(storage.ignore.users || []);
+  const [users, setUsers] = React.useState<string[]>(storage.ignore.users || []);
 
   const handleRemoveUser = (userId: string) => {
     const newArr = users.filter((id: string) => id !== userId);
@@ -39,54 +40,57 @@ export default function Settings() {
   };
 
   return (
-    <ReactNative.ScrollView style={{ flex: 1 }}>
-      <FormSection title="Settings">
-        <FormSwitchRow
-          label="Ignore Bots"
-          subLabel="Don't log messages from bots"
-          value={storage.ignore.bots}
-          onValueChange={(value: boolean) => {
-            storage.ignore.bots = value;
-          }}
-        />
-        <FormSwitchRow
-          label="Ignore My Own Messages"
-          subLabel="Don't log deletions or edits of your own messages"
-          value={storage.ignore.ownMessages}
-          onValueChange={(value: boolean) => {
-            storage.ignore.ownMessages = value;
-          }}
-        />
-      </FormSection>
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 10 }}>
+      <Stack spacing={8}>
+        <TableRowGroup title="Filters">
+          <TableSwitchRow
+            label="Ignore Bots"
+            subLabel="Don't log messages from bots"
+            value={!!storage.ignore.bots}
+            onValueChange={(v: boolean) => {
+              storage.ignore.bots = v;
+            }}
+          />
+          <TableSwitchRow
+            label="Ignore My Own Messages"
+            subLabel="Don't log deletions or edits of your own messages"
+            value={!!storage.ignore.ownMessages}
+            onValueChange={(v: boolean) => {
+              storage.ignore.ownMessages = v;
+            }}
+          />
+        </TableRowGroup>
 
-      <FormSection title="Ignored Users">
-        <FormRow
-          label="Clear All"
-          subLabel={`${users.length} users ignored`}
-          trailing={<FormRow.Icon source={getAssetIDByName("ic_trash_24px")} />}
-          onPress={handleClearUsers}
-        />
+        <TableRowGroup title="Ignored Users">
+          <FormRow
+            label="Clear All"
+            subLabel={`${users.length} users ignored`}
+            trailing={<FormRow.Icon source={getAssetIDByName("ic_trash_24px")} />}
+            onPress={handleClearUsers}
+          />
 
-        {users.length === 0 ? (
-          <FormText style={{ padding: 12 }}>No users ignored.</FormText>
-        ) : (
-          users.map((id: string) => {
-            const user = UserStore?.getUser(id);
-            const name = user?.username || id;
-            return (
-              <FormRow
-                key={id}
-                label={name}
-                trailing={
-                  <ReactNative.TouchableOpacity onPress={() => handleRemoveUser(id)}>
-                    <FormRow.Icon source={getAssetIDByName("ic_close_24px")} />
-                  </ReactNative.TouchableOpacity>
-                }
-              />
-            );
-          })
-        )}
-      </FormSection>
-    </ReactNative.ScrollView>
+          {users.length === 0 ? (
+            <FormText style={{ padding: 12 }}>No users ignored.</FormText>
+          ) : (
+            users.map((id: string) => {
+              const user = UserStore?.getUser(id);
+              const name = user?.username || id;
+              return (
+                <FormRow
+                  key={id}
+                  label={name}
+                  trailing={
+                    <FormRow.Icon
+                      source={getAssetIDByName("ic_close_24px")}
+                      onPress={() => handleRemoveUser(id)}
+                    />
+                  }
+                />
+              );
+            })
+          )}
+        </TableRowGroup>
+      </Stack>
+    </ScrollView>
   );
 }
