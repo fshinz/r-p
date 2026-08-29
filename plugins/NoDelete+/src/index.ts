@@ -13,9 +13,10 @@ let MessageStore: any;
 let AuthStore: any;
 const patches: (() => void)[] = [];
 
-// Persistent cache for deleted messages and edit histories
+// Lightweight in-memory caches (Bounded to prevent memory leaks)
 const deletedCache = new Map<string, any>();
 const editMap = new Map<string, string[]>();
+const MAX_CACHE_SIZE = 300;
 
 storage.ignore ??= { users: [], bots: false, ownMessages: false };
 
@@ -25,14 +26,25 @@ function buildAutomodMessage(text: string, timestamp: string): string {
   return `${text} (${timestamp})`;
 }
 
+// Memory safety cleanup
+function enforceCacheLimit(map: Map<any, any>, max: number) {
+  while (map.size > max) {
+    const oldestKey = map.keys().next().value;
+    if (oldestKey === undefined) break;
+    map.delete(oldestKey);
+  }
+}
+
+// Deep clone embeds, attachments, components, and stickers accurately
 function cloneSnapshot(msg: any) {
   if (!msg) return null;
   return {
     ...msg,
     content: msg.content || "",
     embeds: Array.isArray(msg.embeds) ? JSON.parse(JSON.stringify(msg.embeds)) : [],
-    components: Array.isArray(msg.components) ? JSON.parse(JSON.stringify(msg.components)) : [],
     attachments: Array.isArray(msg.attachments) ? JSON.parse(JSON.stringify(msg.attachments)) : [],
+    components: Array.isArray(msg.components) ? JSON.parse(JSON.stringify(msg.components)) : [],
+    sticker_items: msg.sticker_items || msg.stickerItems || [],
     flags: msg.flags || 0,
     deletedAt: msg.deletedAt || moment().format("HH:mm:ss"),
   };
@@ -49,7 +61,7 @@ export default {
         AuthStore?.getId?.() ||
         MessageStore?.getCurrentUser?.()?.id;
 
-      // 1. CATCH NONCE REPLACEMENTS & LOCAL DELETES
+      // 1. CACHE MESSAGES BEFORE THEY DISAPPEAR (Captures Embeds & Attachments)
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -57,35 +69,27 @@ export default {
 
           if (event.type === "MESSAGE_CREATE") {
             const msg = event.message;
-            if (!msg?.nonce || !msg?.channel_id) return;
-
-            const currentUserId = getCurrentUserId();
-            if (msg.author?.id === currentUserId) return;
-
-            const existing = MessageStore?.getMessage(msg.channel_id, msg.nonce);
-            if (existing && existing.id !== msg.id) {
-              if (!deletedCache.has(existing.id)) {
-                deletedCache.set(existing.id, cloneSnapshot(existing));
-              }
-              delete msg.nonce;
-            }
+            if (!msg?.id) return;
+            
+            // Fast cache message for potential deletion recovery
+            deletedCache.set(msg.id, cloneSnapshot(msg));
+            enforceCacheLimit(deletedCache, MAX_CACHE_SIZE);
           }
 
           if (event.type === "MESSAGE_DELETE") {
-            const { channelId, id, mlDeleted } = event;
+            const { channelId, id } = event;
             if (!id || !channelId) return;
 
             const existing = MessageStore?.getMessage(channelId, id);
             if (existing && !deletedCache.has(id)) {
               deletedCache.set(id, cloneSnapshot(existing));
+              enforceCacheLimit(deletedCache, MAX_CACHE_SIZE);
             }
-
-            if (mlDeleted) delete event.mlDeleted;
           }
         })
       );
 
-      // 2. SINGLE MESSAGE DELETE HANDLER
+      // 2. SINGLE DELETION INTERCEPTOR
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -97,7 +101,7 @@ export default {
 
           if (!cachedMsg) return;
           if (storage.ignore?.users?.includes(cachedMsg.author?.id)) return;
-          if (storage.ignore?.bots && cachedMsg.author?.bot) return;
+          if (storage.ignore?.bots && (cachedMsg.author?.bot || cachedMsg.author?.isNonUserBot?.())) return;
           if (storage.ignore?.ownMessages && cachedMsg.author?.id === currentUserId) return;
 
           if (!deletedCache.has(event.id)) {
@@ -106,8 +110,8 @@ export default {
 
           const snapshot = deletedCache.get(event.id);
           const time = snapshot?.deletedAt || moment().format("HH:mm:ss");
-          const automodMessage = buildAutomodMessage(DELETED_TEXT, time);
 
+          // Renders via standard native AutoMod banner - ultra fast, zero UI lag
           args[0] = {
             type: "MESSAGE_EDIT_FAILED_AUTOMOD",
             messageData: {
@@ -118,20 +122,21 @@ export default {
                 messageId: event.id,
                 content: snapshot?.content || "",
                 embeds: snapshot?.embeds || [],
-                components: snapshot?.components || [],
                 attachments: snapshot?.attachments || [],
+                components: snapshot?.components || [],
+                sticker_items: snapshot?.sticker_items || [],
                 flags: snapshot?.flags || 0,
               },
             },
             errorResponseBody: {
               code: 200000,
-              message: automodMessage,
+              message: buildAutomodMessage(DELETED_TEXT, time),
             },
           };
         })
       );
 
-      // 3. BULK DELETE HANDLER
+      // 3. BULK DELETION INTERCEPTOR
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -140,7 +145,6 @@ export default {
 
           const currentUserId = getCurrentUserId();
           const time = moment().format("HH:mm:ss");
-          const automodMessage = buildAutomodMessage(DELETED_TEXT, time);
 
           let validCount = 0;
 
@@ -148,7 +152,7 @@ export default {
             const cachedMsg = MessageStore?.getMessage(event.channelId, id) || deletedCache.get(id);
             if (!cachedMsg) continue;
             if (storage.ignore?.users?.includes(cachedMsg.author?.id)) continue;
-            if (storage.ignore?.bots && cachedMsg.author?.bot) continue;
+            if (storage.ignore?.bots && (cachedMsg.author?.bot || cachedMsg.author?.isNonUserBot?.())) continue;
             if (storage.ignore?.ownMessages && cachedMsg.author?.id === currentUserId) continue;
 
             if (!deletedCache.has(id)) {
@@ -168,14 +172,14 @@ export default {
                   messageId: id,
                   content: snapshot?.content || "",
                   embeds: snapshot?.embeds || [],
-                  components: snapshot?.components || [],
                   attachments: snapshot?.attachments || [],
+                  components: snapshot?.components || [],
                   flags: snapshot?.flags || 0,
                 },
               },
               errorResponseBody: {
                 code: 200000,
-                message: automodMessage,
+                message: buildAutomodMessage(DELETED_TEXT, time),
               },
             });
           }
@@ -186,7 +190,7 @@ export default {
         })
       );
 
-      // 4. EDITS PRESERVATION
+      // 4. EDITS PRESERVATION (Preserves original embeds & attachments on edit updates)
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -198,17 +202,19 @@ export default {
 
           const currentUserId = getCurrentUserId();
           if (storage.ignore?.users?.includes(newMsg.author?.id)) return;
-          if (storage.ignore?.bots && newMsg.author?.bot) return;
+          if (storage.ignore?.bots && (newMsg.author?.bot || newMsg.author?.isNonUserBot?.())) return;
           if (storage.ignore?.ownMessages && newMsg.author?.id === currentUserId) return;
 
           const oldMsg = MessageStore?.getMessage(newMsg.channel_id, newMsg.id) || deletedCache.get(newMsg.id);
 
-          if (oldMsg && oldMsg.embeds?.length && !newMsg.embeds?.length) {
-            newMsg.embeds = JSON.parse(JSON.stringify(oldMsg.embeds));
-          }
-
-          if (oldMsg && oldMsg.components?.length && !newMsg.components?.length) {
-            newMsg.components = JSON.parse(JSON.stringify(oldMsg.components));
+          // Preserve embeds and attachments if Discord tried to strip them during edit
+          if (oldMsg) {
+            if (oldMsg.embeds?.length && !newMsg.embeds?.length) {
+              newMsg.embeds = JSON.parse(JSON.stringify(oldMsg.embeds));
+            }
+            if (oldMsg.attachments?.length && !newMsg.attachments?.length) {
+              newMsg.attachments = JSON.parse(JSON.stringify(oldMsg.attachments));
+            }
           }
 
           if (!newMsg.content || newMsg.content.trim() === "") return;
@@ -220,10 +226,10 @@ export default {
           }
           if (history.length > 5) history = history.slice(-5);
           editMap.set(newMsg.id, history);
+          enforceCacheLimit(editMap, MAX_CACHE_SIZE);
         })
       );
 
-      // Register all style patches
       patches.push(patchRowStyling(deletedCache, editMap));
       patches.push(patchEditStyling(editMap));
       patches.push(patchContextMenu());
