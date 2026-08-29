@@ -7,12 +7,13 @@ import { showToast } from "@vendetta/ui/toasts";
 import Settings from "./settings";
 import { patchContextMenu } from "./patches/contextMenu";
 import { patchEditStyling } from "./patches/editStyling";
+import { patchRowStyling } from "./patches/rowStyling";
 
 let MessageStore: any;
 let AuthStore: any;
 const patches: (() => void)[] = [];
 
-// Persistent cache for deleted messages, components, embeds, and attachments
+// Persistent cache for deleted messages and edit histories
 const deletedCache = new Map<string, any>();
 const editMap = new Map<string, string[]>();
 
@@ -24,7 +25,6 @@ function buildAutomodMessage(text: string, timestamp: string): string {
   return `${text} (${timestamp})`;
 }
 
-// Deep clone helper for components, embeds, and raw payload structures
 function cloneSnapshot(msg: any) {
   if (!msg) return null;
   return {
@@ -49,13 +49,12 @@ export default {
         AuthStore?.getId?.() ||
         MessageStore?.getCurrentUser?.()?.id;
 
-      // ── 1. CATCH NONCE REPLACEMENTS, DELETIONS & FULL SNAPSHOTS ──
+      // 1. CATCH NONCE REPLACEMENTS & LOCAL DELETES
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
           if (!event?.type) return;
 
-          // Catch incoming messages attempting nonce overwrites
           if (event.type === "MESSAGE_CREATE") {
             const msg = event.message;
             if (!msg?.nonce || !msg?.channel_id) return;
@@ -72,7 +71,6 @@ export default {
             }
           }
 
-          // Catch local delete events and snapshot full state
           if (event.type === "MESSAGE_DELETE") {
             const { channelId, id, mlDeleted } = event;
             if (!id || !channelId) return;
@@ -87,7 +85,7 @@ export default {
         })
       );
 
-      // ── 2. SINGLE MESSAGE DELETE HANDLER (LEGACY EMBEDS + V2 COMPONENTS) ──
+      // 2. SINGLE MESSAGE DELETE HANDLER
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -110,7 +108,6 @@ export default {
           const time = snapshot?.deletedAt || moment().format("HH:mm:ss");
           const automodMessage = buildAutomodMessage(DELETED_TEXT, time);
 
-          // Force full re-hydration of both components AND legacy embeds
           args[0] = {
             type: "MESSAGE_EDIT_FAILED_AUTOMOD",
             messageData: {
@@ -134,7 +131,7 @@ export default {
         })
       );
 
-      // ── 3. BULK DELETE HANDLER ──
+      // 3. BULK DELETE HANDLER
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -189,7 +186,7 @@ export default {
         })
       );
 
-      // ── 4. EDITS & EMBED/COMPONENT PRESERVATION ──
+      // 4. EDITS PRESERVATION
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -206,12 +203,10 @@ export default {
 
           const oldMsg = MessageStore?.getMessage(newMsg.channel_id, newMsg.id) || deletedCache.get(newMsg.id);
 
-          // Restore legacy embeds if stripped by edit
           if (oldMsg && oldMsg.embeds?.length && !newMsg.embeds?.length) {
             newMsg.embeds = JSON.parse(JSON.stringify(oldMsg.embeds));
           }
 
-          // Restore components if stripped by edit
           if (oldMsg && oldMsg.components?.length && !newMsg.components?.length) {
             newMsg.components = JSON.parse(JSON.stringify(oldMsg.components));
           }
@@ -228,6 +223,8 @@ export default {
         })
       );
 
+      // Register all style patches
+      patches.push(patchRowStyling(deletedCache, editMap));
       patches.push(patchEditStyling(editMap));
       patches.push(patchContextMenu());
 
