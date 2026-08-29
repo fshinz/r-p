@@ -4,12 +4,39 @@ import { findByProps, findByName } from "@vendetta/metro";
 
 const TAG = "[MessageLogger]";
 
+// Helper to create a text node
 function textNode(text: string) {
   return { content: text, type: "text" };
 }
 
-function editedTagNode(processedColor: any) {
-  return {
+// Style the row for deleted messages
+function styleDeleted(message: any, info: { content: string; timestamp: string }) {
+  // Set text color to red
+  message.textColor = ReactNative.processColor("#E44043");
+
+  // Build content: original + (deleted) + timestamp
+  let nodes: any[] = [];
+  if (Array.isArray(message.content)) {
+    nodes = message.content.slice(); // copy
+  } else {
+    nodes = [textNode(message.content || "")];
+  }
+  nodes.push(textNode(" (deleted)"));
+  if (info.timestamp) {
+    nodes.push(textNode(` *${info.timestamp}*`));
+  }
+  message.content = nodes;
+}
+
+// Style the row for edited messages
+function styleEdited(message: any, info: { oldContent: string; newContent: string; timestamp: string }) {
+  if (message.__loggerEditApplied) return;
+  message.__loggerEditApplied = true;
+
+  const nodes: any[] = [];
+  nodes.push(textNode(info.oldContent || "(empty)"));
+  // Add (edited) tag – we can make it gray by using a link with muted color
+  nodes.push({
     type: "link",
     target: "usernameOnClick",
     context: {
@@ -17,27 +44,35 @@ function editedTagNode(processedColor: any) {
       usernameOnClick: {
         action: "0",
         userId: "0",
-        linkColor: processedColor,
+        linkColor: ReactNative.processColor("#949BA4"),
         messageChannelId: "0",
       },
       medium: true,
     },
     content: [textNode(" (edited)")],
-  };
-}
-
-function applyEditHistory(message: any, history: { oldContent: string; newContent: string; timestamp: string }, editedColor: any) {
-  if (message.__loggerEditApplied) return;
-  message.__loggerEditApplied = true;
-
-  const currentContent: any[] = Array.isArray(message.content) ? message.content : [textNode(String(message.content ?? ""))];
-  const nodes: any[] = [];
-  nodes.push(textNode(history.oldContent || "(empty)"));
-  nodes.push(editedTagNode(editedColor));
+  });
   nodes.push(textNode("\n↓\n"));
-  nodes.push(textNode(history.newContent || "(empty)"));
-  nodes.push(editedTagNode(editedColor));
-  nodes.push(textNode(`\n*${history.timestamp}*`));
+  nodes.push(textNode(info.newContent || "(empty)"));
+  // Another edited tag
+  nodes.push({
+    type: "link",
+    target: "usernameOnClick",
+    context: {
+      username: 1,
+      usernameOnClick: {
+        action: "0",
+        userId: "0",
+        linkColor: ReactNative.processColor("#949BA4"),
+        messageChannelId: "0",
+      },
+      medium: true,
+    },
+    content: [textNode(" (edited)")],
+  });
+  if (info.timestamp) {
+    nodes.push(textNode(` *${info.timestamp}*`));
+  }
+
   message.content = nodes;
 }
 
@@ -48,32 +83,22 @@ export function patchRowStyling(deletedMessages: Map<string, any>, editedMessage
     const message = row?.message;
     if (!message?.id) return;
 
-    // Deleted
+    // Deleted?
     if (deletedMessages.has(message.id)) {
       const info = deletedMessages.get(message.id);
-      message.textColor = ReactNative.processColor("#E44043"); // red
-      if (Array.isArray(message.content)) {
-        message.content.push(textNode(" (deleted)"));
-      } else {
-        const oldContent = message.content || "";
-        message.content = [textNode(oldContent), textNode(" (deleted)")];
-      }
-      if (info?.timestamp) {
-        message.content.push(textNode(` *${info.timestamp}*`));
-      }
+      styleDeleted(message, info);
       return;
     }
 
-    // Edited
+    // Edited?
     if (editedMessages.has(message.id)) {
       const info = editedMessages.get(message.id);
-      const editedColor = ReactNative.processColor("#949BA4");
-      applyEditHistory(message, info, editedColor);
+      styleEdited(message, info);
       return;
     }
   }
 
-  // Try NativeModules.DCDChatManager.updateRows first
+  // Try NativeModules.DCDChatManager.updateRows (most common)
   const { NativeModules } = ReactNative;
   if (NativeModules?.DCDChatManager?.updateRows) {
     cleanups.push(
