@@ -1,38 +1,30 @@
+// index.ts — merged, embeds/edits only, no cloudSync, no inline-reinsertion, no per-row edit history overlay
 import { findByStoreName, findByProps } from "@vendetta/metro";
-import { FluxDispatcher } from "@vendetta/metro/common";
+import { FluxDispatcher, moment } from "@vendetta/metro/common";
 import { storage } from "@vendetta/plugin";
-import { before as patchBefore } from "@vendetta/patcher";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import { showToast } from "@vendetta/ui/toasts";
 import Settings from "./settings";
 import { patchContextMenu } from "./patches/contextMenu";
-import { patchEditStyling } from "./patches/editStyling";
-import { patchRowStyling } from "./patches/rowStyling";
 
 let MessageStore: any;
 let AuthStore: any;
-let ChannelStore: any;
-const ChannelMessages = findByProps("_channelMessages");
-const patches: (() => void)[] = [];
+const cleanups: (() => void)[] = [];
 
-// Track message snapshots mapped by ID
-const messageMap = new Map<string, any>();
-const deletedIds = new Set<string>(); 
-const editMap = new Map<string, string[]>();
+// Only a shadow copy of recent messages, capped, so deletes/edits can be reconstructed.
+// No cloud sync, no inline reinsertion into ChannelMessages, no persistent editMap growth.
+const MAX_TRACKED = 500;
+const shadow = new Map<string, any>();
 
-const MAX_CACHE_SIZE = 500;
 storage.ignore ??= { users: [], bots: false, ownMessages: false };
 
-function enforceCacheLimits() {
-  while (messageMap.size > MAX_CACHE_SIZE) {
-    const oldestKey = messageMap.keys().next().value;
-    if (oldestKey === undefined) break;
-    messageMap.delete(oldestKey);
-  }
-  while (deletedIds.size > MAX_CACHE_SIZE) {
-    const oldestKey = deletedIds.values().next().value;
-    if (oldestKey === undefined) break;
-    deletedIds.delete(oldestKey);
+const DELETED_TEXT = "This message was deleted";
+
+function evictOldest(map: Map<string, any>, max: number) {
+  while (map.size > max) {
+    const k = map.keys().next().value;
+    if (k === undefined) break;
+    map.delete(k);
   }
 }
 
@@ -42,24 +34,23 @@ function cloneSnapshot(msg: any) {
     ...msg,
     content: msg.content || "",
     embeds: Array.isArray(msg.embeds) ? JSON.parse(JSON.stringify(msg.embeds)) : [],
-    attachments: Array.isArray(msg.attachments) ? JSON.parse(JSON.stringify(msg.attachments)) : [],
     components: Array.isArray(msg.components) ? JSON.parse(JSON.stringify(msg.components)) : [],
-    sticker_items: msg.sticker_items || msg.stickerItems || [],
+    attachments: Array.isArray(msg.attachments) ? JSON.parse(JSON.stringify(msg.attachments)) : [],
+    flags: msg.flags || 0,
+    deletedAt: msg.deletedAt || moment().format("HH:mm:ss"),
   };
 }
 
-function keepDeletedInStore(channelId: string, msg: any) {
-  if (!ChannelMessages || !channelId || !msg) return;
-  try {
-    const record = ChannelMessages.get(channelId);
-    if (!record) return;
-    
-    // Force native ChannelMessages collection to accept the restored snapshot
-    const updatedRecord = record.receiveMessage(msg);
-    ChannelMessages.commit(updatedRecord);
-  } catch (e) {
-    console.error("[MessageLogger] Re-injection failed:", e);
-  }
+function buildAutomodMessage(text: string, timestamp: string) {
+  return `${text} (${timestamp})`;
+}
+
+function isIgnored(author: any, currentUserId: string) {
+  if (!author) return false;
+  if (storage.ignore?.users?.includes(author.id)) return true;
+  if (storage.ignore?.bots && author.bot) return true;
+  if (storage.ignore?.ownMessages && author.id === currentUserId) return true;
+  return false;
 }
 
 export default {
@@ -67,132 +58,136 @@ export default {
     try {
       MessageStore = findByStoreName("MessageStore");
       AuthStore = findByStoreName("AuthenticationStore") || findByProps("getToken");
-      ChannelStore = findByStoreName("ChannelStore");
 
       const getCurrentUserId = () =>
         AuthStore?.getCurrentUser?.()?.id ||
         AuthStore?.getId?.() ||
         MessageStore?.getCurrentUser?.()?.id;
 
-      // 1. Capture ALL incoming/updated messages into our persistent snapshot map
-      patches.push(
-        patchBefore("dispatch", FluxDispatcher, (args) => {
-          const event = args[0];
-          if (!event?.type) return;
+      // Cheap: Flux only calls us for these exact types, not every action in the app.
+      const onCreate = (event: any) => {
+        const msg = event?.message;
+        if (!msg?.id) return;
+        shadow.set(msg.id, msg);
+        evictOldest(shadow, MAX_TRACKED);
+      };
 
-          if (event.type === "MESSAGE_CREATE" || event.type === "LOAD_MESSAGES_SUCCESS") {
-            const msgs = event.messages ? event.messages : [event.message];
-            for (const msg of msgs) {
-              if (msg?.id) {
-                messageMap.set(msg.id, cloneSnapshot(msg));
-              }
-            }
-            enforceCacheLimits();
-          }
-        })
+      const onDelete = (event: any) => {
+        const { channelId, id } = event;
+        if (!id || !channelId) return;
+
+        const currentUserId = getCurrentUserId();
+        const cached = MessageStore?.getMessage(channelId, id) || shadow.get(id);
+        if (!cached) return;
+        if (isIgnored(cached.author, currentUserId)) return;
+
+        const snapshot = cloneSnapshot(cached);
+        shadow.delete(id);
+
+        const time = snapshot?.deletedAt || moment().format("HH:mm:ss");
+        FluxDispatcher.dispatch({
+          type: "MESSAGE_EDIT_FAILED_AUTOMOD",
+          messageData: {
+            type: 1,
+            message: {
+              ...snapshot,
+              channelId,
+              messageId: id,
+              content: snapshot?.content || "",
+              embeds: snapshot?.embeds || [],
+              components: snapshot?.components || [],
+              attachments: snapshot?.attachments || [],
+              flags: snapshot?.flags || 0,
+            },
+          },
+          errorResponseBody: { code: 200000, message: buildAutomodMessage(DELETED_TEXT, time) },
+        });
+      };
+
+      const onBulkDelete = (event: any) => {
+        const { channelId, ids } = event;
+        if (!channelId || !Array.isArray(ids)) return;
+        const currentUserId = getCurrentUserId();
+        const time = moment().format("HH:mm:ss");
+
+        for (const id of ids) {
+          const cached = MessageStore?.getMessage(channelId, id) || shadow.get(id);
+          if (!cached) continue;
+          if (isIgnored(cached.author, currentUserId)) continue;
+
+          const snapshot = cloneSnapshot({ ...cached, deletedAt: time });
+          shadow.delete(id);
+
+          FluxDispatcher.dispatch({
+            type: "MESSAGE_EDIT_FAILED_AUTOMOD",
+            messageData: {
+              type: 1,
+              message: {
+                ...snapshot,
+                channelId,
+                messageId: id,
+                content: snapshot?.content || "",
+                embeds: snapshot?.embeds || [],
+                components: snapshot?.components || [],
+                attachments: snapshot?.attachments || [],
+                flags: snapshot?.flags || 0,
+              },
+            },
+            errorResponseBody: { code: 200000, message: buildAutomodMessage(DELETED_TEXT, time) },
+          });
+        }
+      };
+
+      // Edit handling: only restore stripped embeds/components. No history overlay, no row patching.
+      const onUpdate = (event: any) => {
+        const newMsg = event?.message;
+        if (!newMsg?.id) return;
+
+        const oldMsg = shadow.get(newMsg.id);
+        shadow.set(newMsg.id, newMsg);
+        evictOldest(shadow, MAX_TRACKED);
+        if (!oldMsg) return;
+
+        const currentUserId = getCurrentUserId();
+        if (isIgnored(newMsg.author, currentUserId)) return;
+
+        if (oldMsg.embeds?.length && !newMsg.embeds?.length) {
+          newMsg.embeds = JSON.parse(JSON.stringify(oldMsg.embeds));
+        }
+        if (oldMsg.components?.length && !newMsg.components?.length) {
+          newMsg.components = JSON.parse(JSON.stringify(oldMsg.components));
+        }
+      };
+
+      FluxDispatcher.subscribe("MESSAGE_CREATE", onCreate);
+      FluxDispatcher.subscribe("MESSAGE_DELETE", onDelete);
+      FluxDispatcher.subscribe("MESSAGE_DELETE_BULK", onBulkDelete);
+      FluxDispatcher.subscribe("MESSAGE_UPDATE", onUpdate);
+
+      cleanups.push(
+        () => FluxDispatcher.unsubscribe("MESSAGE_CREATE", onCreate),
+        () => FluxDispatcher.unsubscribe("MESSAGE_DELETE", onDelete),
+        () => FluxDispatcher.unsubscribe("MESSAGE_DELETE_BULK", onBulkDelete),
+        () => FluxDispatcher.unsubscribe("MESSAGE_UPDATE", onUpdate),
       );
 
-      // 2. Intercept SINGLE Deletions BEFORE the store clears the record
-      patches.push(
-        patchBefore("dispatch", FluxDispatcher, (args) => {
-          const event = args[0];
-          if (event?.type !== "MESSAGE_DELETE") return;
-          const { channelId, id } = event;
-          if (!id || !channelId) return;
-
-          const currentUserId = getCurrentUserId();
-          const targetMsg = messageMap.get(id) || MessageStore?.getMessage(channelId, id);
-          if (!targetMsg) return;
-
-          if (storage.ignore?.users?.includes(targetMsg.author?.id)) return;
-          if (storage.ignore?.bots && (targetMsg.author?.bot || targetMsg.author?.isNonUserBot?.())) return;
-          if (storage.ignore?.ownMessages && targetMsg.author?.id === currentUserId) return;
-
-          // Flag ID as deleted for row styling
-          deletedIds.add(id);
-          const snapshot = cloneSnapshot(targetMsg);
-          messageMap.set(id, snapshot);
-
-          // Force-inject back into Discord's row manager
-          setTimeout(() => keepDeletedInStore(channelId, snapshot), 0);
-        })
-      );
-
-      // 3. Intercept BULK Deletions
-      patches.push(
-        patchBefore("dispatch", FluxDispatcher, (args) => {
-          const event = args[0];
-          if (event?.type !== "MESSAGE_DELETE_BULK") return;
-          const { channelId, ids } = event;
-          if (!ids?.length || !channelId) return;
-
-          const currentUserId = getCurrentUserId();
-          for (const id of ids) {
-            const targetMsg = messageMap.get(id) || MessageStore?.getMessage(channelId, id);
-            if (!targetMsg) continue;
-
-            if (storage.ignore?.users?.includes(targetMsg.author?.id)) continue;
-            if (storage.ignore?.bots && (targetMsg.author?.bot || targetMsg.author?.isNonUserBot?.())) continue;
-            if (storage.ignore?.ownMessages && targetMsg.author?.id === currentUserId) continue;
-
-            deletedIds.add(id);
-            const snapshot = cloneSnapshot(targetMsg);
-            messageMap.set(id, snapshot);
-
-            setTimeout(() => keepDeletedInStore(channelId, snapshot), 0);
-          }
-          enforceCacheLimits();
-        })
-      );
-
-      // 4. Preserve Embeds / Attachments on Message Edits
-      patches.push(
-        patchBefore("dispatch", FluxDispatcher, (args) => {
-          const event = args[0];
-          if (event?.type !== "MESSAGE_UPDATE" || !event?.message?.id) return;
-          
-          const newMsg = event.message;
-          const currentUserId = getCurrentUserId();
-          const oldMsg = MessageStore?.getMessage(newMsg.channel_id, newMsg.id) || messageMap.get(newMsg.id);
-
-          if (oldMsg) {
-            if (oldMsg.embeds?.length && !newMsg.embeds?.length) {
-              newMsg.embeds = JSON.parse(JSON.stringify(oldMsg.embeds));
-            }
-            if (oldMsg.attachments?.length && !newMsg.attachments?.length) {
-              newMsg.attachments = JSON.parse(JSON.stringify(oldMsg.attachments));
-            }
-          }
-
-          if (!newMsg.content || !oldMsg?.content || oldMsg.content === newMsg.content) return;
-          if (storage.ignore?.users?.includes(newMsg.author?.id)) return;
-          if (storage.ignore?.ownMessages && newMsg.author?.id === currentUserId) return;
-
-          let history = editMap.get(newMsg.id) || [];
-          if (history.length === 0 || history[history.length - 1] !== oldMsg.content) {
-            history.push(oldMsg.content);
-          }
-          if (history.length > 5) history = history.slice(-5);
-          editMap.set(newMsg.id, history);
-        })
-      );
-
-      patches.push(patchRowStyling(deletedIds, editMap));
-      patches.push(patchEditStyling(editMap));
-      patches.push(patchContextMenu());
+      cleanups.push(patchContextMenu());
 
       showToast("Message Logger loaded", getAssetIDByName("Check"));
     } catch (e) {
       console.error("[MessageLogger] Load error:", e);
+      showToast("Failed to load Message Logger", getAssetIDByName("Small"));
     }
   },
 
   onUnload() {
-    for (const unpatch of patches) unpatch();
-    patches.length = 0;
-    messageMap.clear();
-    deletedIds.clear();
-    editMap.clear();
+    for (const fn of cleanups) {
+      try { fn(); } catch (_) {}
+    }
+    cleanups.length = 0;
+    shadow.clear();
+    showToast("Message Logger unloaded", getAssetIDByName("Check"));
   },
+
   settings: Settings,
 };
