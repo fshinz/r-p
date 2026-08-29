@@ -1,59 +1,97 @@
 import { after } from "@vendetta/patcher";
-import { findByName } from "@vendetta/metro";
+import { findByProps, findByName } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
 import { showToast } from "@vendetta/ui/toasts";
 
-const NAMES = ["UserProfileOverflowMenu", "BotUserProfileOverflowMenu"];
-
-function getMainItems(ret: any): any[] | null {
-  let items = ret?.props?.items;
-  if (Array.isArray(items) && Array.isArray(items[0])) return items[0];
-  items = ret?.props?.children?.props?.items;
-  if (Array.isArray(items) && Array.isArray(items[0])) return items[0];
-  return null;
-}
-
-function patchFn(args: any[], ret: any) {
-  try {
-    const props = args[0] ?? {};
-    const userId = props.user?.id;
-    if (!userId) return;
-
-    const items = getMainItems(ret);
-    if (!items) return;
-
-    if (items.some((i: any) => i?.label === "Ignore User" || i?.label === "Unignore User")) return;
-
-    const isIgnored = storage.ignore?.users?.includes(userId);
-    const insertIndex = items.findIndex((i: any) => i?.isDestructive);
-    const index = insertIndex === -1 ? items.length : insertIndex;
-
-    items.splice(index, 0, {
-      label: isIgnored ? "Unignore User" : "Ignore User",
-      isDestructive: !isIgnored,
-      action: () => {
-        if (isIgnored) {
-          storage.ignore.users = storage.ignore.users.filter((id: string) => id !== userId);
-          showToast(`Unignored ${props.user?.username || "user"}`);
-        } else {
-          if (!storage.ignore.users) storage.ignore.users = [];
-          storage.ignore.users.push(userId);
-          showToast(`Ignoring ${props.user?.username || "user"}`);
-        }
-      },
-    });
-  } catch (e) {
-    console.error("[MessageLogger] Context menu error:", e);
-  }
-}
+// Target standard sheet hooks across different Vendetta/Revenge versions
+const ContextMenuUtils = findByProps("openLazy", "toggleLazy");
 
 export function patchContextMenu() {
   const unpatches: (() => void)[] = [];
 
-  for (const name of NAMES) {
-    const mod = findByName(name, false);
-    if (mod) unpatches.push(after("default", mod, patchFn));
+  // Try patching openLazy menu generation
+  if (ContextMenuUtils?.openLazy) {
+    unpatches.push(
+      after("openLazy", ContextMenuUtils, (args, res) => {
+        const [componentPromise, menuName] = args;
+        if (!menuName?.includes("User") && !menuName?.includes("Profile")) return;
+
+        componentPromise().then((mod: any) => {
+          if (!mod?.default) return;
+          const target = mod.default;
+
+          const unpatchTarget = after("default", mod, (propsArgs, ret) => {
+            try {
+              const userId = propsArgs[0]?.user?.id || propsArgs[0]?.userId;
+              if (!userId) return;
+
+              const items = 
+                ret?.props?.children?.props?.children ||
+                ret?.props?.children ||
+                ret?.props?.items;
+
+              if (!Array.isArray(items)) return;
+
+              const isIgnored = storage.ignore?.users?.includes(userId);
+
+              items.push({
+                label: isIgnored ? "Unignore User (Logger)" : "Ignore User (Logger)",
+                isDestructive: !isIgnored,
+                action: () => {
+                  storage.ignore ??= { users: [], bots: false, ownMessages: false };
+                  if (isIgnored) {
+                    storage.ignore.users = storage.ignore.users.filter((id: string) => id !== userId);
+                    showToast(`Unignored user`);
+                  } else {
+                    storage.ignore.users.push(userId);
+                    showToast(`Ignoring user messages`);
+                  }
+                },
+              });
+            } catch (e) {
+              console.error("[MessageLogger] Context menu injection error:", e);
+            }
+          });
+          unpatches.push(unpatchTarget);
+        });
+      })
+    );
   }
 
-  return () => { for (const fn of unpatches) fn(); };
+  // Fallback direct patch for named sheet modules
+  const ActionSheetModules = ["UserProfileActionSheet", "UserContextMenu"];
+  for (const name of ActionSheetModules) {
+    const mod = findByName(name, false) || findByProps(name);
+    if (mod) {
+      unpatches.push(
+        after(name in mod ? name : "default", mod, (args, ret) => {
+          const userId = args[0]?.user?.id || args[0]?.userId;
+          if (!userId) return;
+
+          const isIgnored = storage.ignore?.users?.includes(userId);
+          const children = ret?.props?.children?.props?.children || ret?.props?.children;
+
+          if (Array.isArray(children)) {
+            children.push({
+              label: isIgnored ? "Unignore User (Logger)" : "Ignore User (Logger)",
+              action: () => {
+                storage.ignore ??= { users: [], bots: false, ownMessages: false };
+                if (isIgnored) {
+                  storage.ignore.users = storage.ignore.users.filter((id: string) => id !== userId);
+                  showToast(`Unignored user`);
+                } else {
+                  storage.ignore.users.push(userId);
+                  showToast(`Ignoring user messages`);
+                }
+              },
+            });
+          }
+        })
+      );
+    }
+  }
+
+  return () => {
+    for (const fn of unpatches) fn();
+  };
 }
