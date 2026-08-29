@@ -47,6 +47,12 @@ export default {
             const msg = event.message;
             if (!msg?.nonce || !msg?.channel_id) return;
 
+            const currentUserId = getCurrentUserId();
+            const isOwnMessage = msg.author?.id === currentUserId || (storage.ignore?.ownMessages && isOwnMessage);
+
+            // Completely ignore nonce manipulation for your own outgoing messages
+            if (isOwnMessage) return;
+
             const existing = MessageStore?.getMessage(msg.channel_id, msg.nonce);
             if (existing && existing.id !== msg.id) {
               // Cache target message state before it gets overwritten in store
