@@ -1,22 +1,14 @@
+
 import React from "react";
-import { View, Text, Switch, TouchableOpacity, ScrollView } from "react-native";
-import { findByProps, findByStoreName } from "@vendetta/metro";
+import { findByStoreName } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
 import { useProxy } from "@vendetta/storage";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import { showToast } from "@vendetta/ui/toasts";
 import { showConfirmationAlert } from "@vendetta/ui/alerts";
+import { Forms } from "@vendetta/ui/components";
 
-// Fetch theme colors dynamically from Discord's token system
-const { rawColors, ThemeStore } = findByProps("rawColors", "ThemeStore") || {};
-const theme = ThemeStore?.theme || "dark";
-const isDark = theme.includes("dark");
-
-const backgroundColor = isDark ? "#2f3136" : "#f2f3f5";
-const cardBg = isDark ? "#202225" : "#ffffff";
-const textColor = isDark ? "#ffffff" : "#060607";
-const subTextColor = isDark ? "#b9bbbe" : "#4f545c";
-const borderColor = isDark ? "#36393f" : "#e3e5e8";
+const { FormSection, FormRow, FormSwitchRow, FormText } = Forms;
 
 let UserStore: any;
 
@@ -50,72 +42,58 @@ export default function Settings() {
   };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor }} contentContainerStyle={{ padding: 16 }}>
-      {/* FILTERS SECTION */}
-      <Text style={{ fontSize: 12, fontWeight: "bold", color: subTextColor, marginBottom: 8, textTransform: "uppercase" }}>
-        Filters
-      </Text>
-      <View style={{ backgroundColor: cardBg, borderRadius: 10, overflow: "hidden", marginBottom: 20 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 14, borderBottomWidth: 1, borderBottomColor: borderColor }}>
-          <View style={{ flex: 1, paddingRight: 10 }}>
-            <Text style={{ fontSize: 16, color: textColor, fontWeight: "500" }}>Ignore Bots</Text>
-            <Text style={{ fontSize: 12, color: subTextColor, marginTop: 2 }}>Don't log messages sent by bot accounts</Text>
-          </View>
-          <Switch
-            value={!!storage.ignore.bots}
-            onValueChange={(v: boolean) => {
-              storage.ignore.bots = v;
-            }}
-          />
-        </View>
+    <FormSection title="Filters">
+      <FormSwitchRow
+        label="Ignore Bots"
+        subLabel="Don't log messages sent by bot accounts"
+        leading={<FormRow.Icon source={getAssetIDByName("ic_robot")} />}
+        value={!!storage.ignore.bots}
+        onValueChange={(v: boolean) => {
+          storage.ignore.bots = v;
+        }}
+      />
+      <FormSwitchRow
+        label="Ignore My Own Messages"
+        subLabel="Don't log deletions or edits of your own messages"
+        leading={<FormRow.Icon source={getAssetIDByName("ic_account_circle_24px")} />}
+        value={!!storage.ignore.ownMessages}
+        onValueChange={(v: boolean) => {
+          storage.ignore.ownMessages = v;
+        }}
+      />
 
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 14 }}>
-          <View style={{ flex: 1, paddingRight: 10 }}>
-            <Text style={{ fontSize: 16, color: textColor, fontWeight: "500" }}>Ignore My Own Messages</Text>
-            <Text style={{ fontSize: 12, color: subTextColor, marginTop: 2 }}>Don't log deletions or edits of your own messages</Text>
-          </View>
-          <Switch
-            value={!!storage.ignore.ownMessages}
-            onValueChange={(v: boolean) => {
-              storage.ignore.ownMessages = v;
-            }}
-          />
-        </View>
-      </View>
-
-      {/* IGNORED USERS SECTION */}
-      <Text style={{ fontSize: 12, fontWeight: "bold", color: subTextColor, marginBottom: 8, textTransform: "uppercase" }}>
-        Ignored Users
-      </Text>
-      <View style={{ backgroundColor: cardBg, borderRadius: 10, overflow: "hidden" }}>
-        <TouchableOpacity
+      <FormSection title="Ignored Users">
+        <FormRow
+          label="Clear All Ignored Users"
+          subLabel={`${users.length} user${users.length === 1 ? "" : "s"} ignored`}
+          leading={<FormRow.Icon source={getAssetIDByName("ic_trash_24px")} />}
           onPress={handleClearUsers}
-          style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 14, borderBottomWidth: users.length > 0 ? 1 : 0, borderBottomColor: borderColor }}
-        >
-          <View>
-            <Text style={{ fontSize: 16, color: "#ed4245", fontWeight: "500" }}>Clear All Ignored Users</Text>
-            <Text style={{ fontSize: 12, color: subTextColor, marginTop: 2 }}>
-              {users.length} user{users.length === 1 ? "" : "s"} ignored
-            </Text>
-          </View>
-        </TouchableOpacity>
+        />
 
-        {users.map((id: string) => {
-          const user = UserStore?.getUser(id);
-          const name = user?.username ? `@${user.username}` : `User ID: ${id}`;
-          return (
-            <View
-              key={id}
-              style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 14, borderTopWidth: 1, borderTopColor: borderColor }}
-            >
-              <Text style={{ fontSize: 15, color: textColor }}>{name}</Text>
-              <TouchableOpacity onPress={() => handleRemoveUser(id)} style={{ padding: 4 }}>
-                <Text style={{ fontSize: 14, color: "#ed4245", fontWeight: "bold" }}>Remove</Text>
-              </TouchableOpacity>
-            </View>
-          );
-        })}
-      </View>
-    </ScrollView>
+        {users.length === 0 ? (
+          <FormText style={{ padding: 12, opacity: 0.5 }}>
+            No users currently ignored.
+          </FormText>
+        ) : (
+          users.map((id: string) => {
+            const user = UserStore?.getUser(id);
+            const name = user?.username ? `@${user.username}` : `User ID: ${id}`;
+            return (
+              <FormRow
+                key={id}
+                label={name}
+                leading={<FormRow.Icon source={getAssetIDByName("ic_member")} />}
+                trailing={
+                  <FormRow.Icon
+                    source={getAssetIDByName("ic_close_24px")}
+                    onPress={() => handleRemoveUser(id)}
+                  />
+                }
+              />
+            );
+          })
+        )}
+      </FormSection>
+    </FormSection>
   );
 }
