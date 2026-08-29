@@ -12,9 +12,8 @@ let MessageStore: any;
 const patches: (() => void)[] = [];
 const deletedIds: string[] = [];
 
-storage.ignore ??= { users: [], bots: false };
+storage.ignore ??= { users: [], bots: false, ownMessages: false };
 
-// ── NoDelete style: generic message ──
 const DELETED_TEXT = "This message was deleted";
 const BULK_DELETED_TEXT = (count: number) => `${count} messages were deleted`;
 
@@ -26,6 +25,7 @@ export default {
   onLoad() {
     try {
       MessageStore = findByStoreName("MessageStore");
+      const currentUserId = MessageStore?.getCurrentUser?.()?.id;
 
       // ── SINGLE DELETE ──
       patches.push(
@@ -38,6 +38,7 @@ export default {
           if (!msg) return;
           if (storage.ignore?.users?.includes(msg.author?.id)) return;
           if (storage.ignore?.bots && msg.author?.bot) return;
+          if (storage.ignore?.ownMessages && msg.author?.id === currentUserId) return;
 
           if (deletedIds.includes(event.id)) {
             deletedIds.splice(deletedIds.indexOf(event.id), 1);
@@ -78,6 +79,7 @@ export default {
             if (!msg) continue;
             if (storage.ignore?.users?.includes(msg.author?.id)) continue;
             if (storage.ignore?.bots && msg.author?.bot) continue;
+            if (storage.ignore?.ownMessages && msg.author?.id === currentUserId) continue;
             count++;
           }
           if (count === 0) return;
@@ -85,7 +87,6 @@ export default {
           const time = moment().format("HH:mm:ss");
           const automodMessage = buildAutomodMessage(BULK_DELETED_TEXT(count), time);
 
-          // Use the first ID as placeholder
           const firstId = event.ids[0];
           args[0] = {
             type: "MESSAGE_EDIT_FAILED_AUTOMOD",
@@ -104,8 +105,8 @@ export default {
         })
       );
 
-      // ── EDITS: store for row styling ──
-      const editMap = new Map<string, { oldContent: string; newContent: string }>();
+      // ── EDITS: store history (up to 5 previous versions) ──
+      const editMap = new Map<string, string[]>(); // messageId -> array of previous contents (oldest first)
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -116,14 +117,22 @@ export default {
           if (!newMsg.id || !newMsg.channel_id) return;
           if (storage.ignore?.users?.includes(newMsg.author?.id)) return;
           if (storage.ignore?.bots && newMsg.author?.bot) return;
+          if (storage.ignore?.ownMessages && newMsg.author?.id === currentUserId) return;
 
           const oldMsg = MessageStore?.getMessage(newMsg.channel_id, newMsg.id);
           if (!oldMsg) return;
 
-          // Simple content comparison (embeds/attachments not supported here, just text)
           if (oldMsg.content === newMsg.content) return;
 
-          editMap.set(newMsg.id, { oldContent: oldMsg.content || "", newContent: newMsg.content || "" });
+          // Get existing history or create new array
+          let history = editMap.get(newMsg.id) || [];
+          // Add old content to history (if not already the last one)
+          if (history.length === 0 || history[history.length - 1] !== oldMsg.content) {
+            history.push(oldMsg.content || "");
+          }
+          // Keep only last 5
+          if (history.length > 5) history = history.slice(-5);
+          editMap.set(newMsg.id, history);
           setTimeout(() => editMap.delete(newMsg.id), 60000);
         })
       );
