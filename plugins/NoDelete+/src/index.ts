@@ -12,7 +12,7 @@ let MessageStore: any;
 let AuthStore: any;
 const patches: (() => void)[] = [];
 
-// Cache for deleted messages and full embed snapshots
+// Persistent cache for deleted messages, embeds, and attachments
 const deletedCache = new Map<string, any>();
 const editMap = new Map<string, string[]>();
 
@@ -35,7 +35,7 @@ export default {
         AuthStore?.getId?.() ||
         MessageStore?.getCurrentUser?.()?.id;
 
-      // ── 1. CATCH NONCE REPLACEMENTS, DELETIONS & EMBED SNAPSHOTS ──
+      // ── 1. CATCH NONCE REPLACEMENTS, DELETIONS & FULL SNAPSHOTS ──
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -56,7 +56,9 @@ export default {
               if (!deletedCache.has(existing.id)) {
                 deletedCache.set(existing.id, {
                   ...existing,
+                  content: existing.content,
                   embeds: existing.embeds ? [...existing.embeds] : [],
+                  attachments: existing.attachments ? [...existing.attachments] : [],
                   deletedAt: moment().format("HH:mm:ss"),
                 });
               }
@@ -64,7 +66,7 @@ export default {
             }
           }
 
-          // Catch local delete events and snapshot full embeds
+          // Catch local delete events and snapshot full content, embeds & attachments
           if (event.type === "MESSAGE_DELETE") {
             const { channelId, id, mlDeleted } = event;
             if (!id || !channelId) return;
@@ -73,7 +75,9 @@ export default {
             if (existing && !deletedCache.has(id)) {
               deletedCache.set(id, {
                 ...existing,
+                content: existing.content,
                 embeds: existing.embeds ? [...existing.embeds] : [],
+                attachments: existing.attachments ? [...existing.attachments] : [],
                 deletedAt: moment().format("HH:mm:ss"),
               });
             }
@@ -83,7 +87,7 @@ export default {
         })
       );
 
-      // ── 2. SINGLE MESSAGE DELETE HANDLER ──
+      // ── 2. SINGLE MESSAGE DELETE HANDLER (FIXED FOR MANUAL DELETES) ──
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -91,32 +95,39 @@ export default {
           if (!event?.id || !event?.channelId) return;
 
           const currentUserId = getCurrentUserId();
-          const msg = MessageStore?.getMessage(event.channelId, event.id) || deletedCache.get(event.id);
+          const cachedMsg = deletedCache.get(event.id) || MessageStore?.getMessage(event.channelId, event.id);
 
-          if (!msg) return;
-          if (storage.ignore?.users?.includes(msg.author?.id)) return;
-          if (storage.ignore?.bots && msg.author?.bot) return;
-          if (storage.ignore?.ownMessages && msg.author?.id === currentUserId) return;
+          if (!cachedMsg) return;
+          if (storage.ignore?.users?.includes(cachedMsg.author?.id)) return;
+          if (storage.ignore?.bots && cachedMsg.author?.bot) return;
+          if (storage.ignore?.ownMessages && cachedMsg.author?.id === currentUserId) return;
 
-          // Preserve existing embeds on target message
           if (!deletedCache.has(event.id)) {
             deletedCache.set(event.id, {
-              ...msg,
-              embeds: msg.embeds ? [...msg.embeds] : [],
+              ...cachedMsg,
+              content: cachedMsg.content,
+              embeds: cachedMsg.embeds ? [...cachedMsg.embeds] : [],
+              attachments: cachedMsg.attachments ? [...cachedMsg.attachments] : [],
               deletedAt: moment().format("HH:mm:ss"),
             });
           }
 
-          const time = deletedCache.get(event.id)?.deletedAt || moment().format("HH:mm:ss");
+          const snapshot = deletedCache.get(event.id);
+          const time = snapshot?.deletedAt || moment().format("HH:mm:ss");
           const automodMessage = buildAutomodMessage(DELETED_TEXT, time);
 
+          // Inject full preserved message properties back into the Automod store update
           args[0] = {
             type: "MESSAGE_EDIT_FAILED_AUTOMOD",
             messageData: {
               type: 1,
               message: {
+                ...snapshot,
                 channelId: event.channelId,
                 messageId: event.id,
+                content: snapshot?.content || "",
+                embeds: snapshot?.embeds || [],
+                attachments: snapshot?.attachments || [],
               },
             },
             errorResponseBody: {
@@ -127,7 +138,7 @@ export default {
         })
       );
 
-      // ── 3. BULK DELETE HANDLER (WITH EMBED PRESERVATION) ──
+      // ── 3. BULK DELETE HANDLER (WITH FULL RE-HYDRATION) ──
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -141,21 +152,23 @@ export default {
           let validCount = 0;
 
           for (const id of event.ids) {
-            const msg = MessageStore?.getMessage(event.channelId, id) || deletedCache.get(id);
-            if (!msg) continue;
-            if (storage.ignore?.users?.includes(msg.author?.id)) continue;
-            if (storage.ignore?.bots && msg.author?.bot) continue;
-            if (storage.ignore?.ownMessages && msg.author?.id === currentUserId) continue;
+            const cachedMsg = deletedCache.get(id) || MessageStore?.getMessage(event.channelId, id);
+            if (!cachedMsg) continue;
+            if (storage.ignore?.users?.includes(cachedMsg.author?.id)) continue;
+            if (storage.ignore?.bots && cachedMsg.author?.bot) continue;
+            if (storage.ignore?.ownMessages && cachedMsg.author?.id === currentUserId) continue;
 
-            // Preserve embeds across all bulk-deleted items
             if (!deletedCache.has(id)) {
               deletedCache.set(id, {
-                ...msg,
-                embeds: msg.embeds ? [...msg.embeds] : [],
+                ...cachedMsg,
+                content: cachedMsg.content,
+                embeds: cachedMsg.embeds ? [...cachedMsg.embeds] : [],
+                attachments: cachedMsg.attachments ? [...cachedMsg.attachments] : [],
                 deletedAt: time,
               });
             }
 
+            const snapshot = deletedCache.get(id);
             validCount++;
 
             FluxDispatcher.dispatch({
@@ -163,8 +176,12 @@ export default {
               messageData: {
                 type: 1,
                 message: {
+                  ...snapshot,
                   channelId: event.channelId,
                   messageId: id,
+                  content: snapshot?.content || "",
+                  embeds: snapshot?.embeds || [],
+                  attachments: snapshot?.attachments || [],
                 },
               },
               errorResponseBody: {
@@ -196,8 +213,8 @@ export default {
           if (storage.ignore?.ownMessages && newMsg.author?.id === currentUserId) return;
 
           const oldMsg = MessageStore?.getMessage(newMsg.channel_id, newMsg.id) || deletedCache.get(newMsg.id);
-          
-          // If embed array changed or got suppressed/removed by edit
+
+          // Restore embeds if suppressed or removed via edit
           if (oldMsg && oldMsg.embeds?.length && !newMsg.embeds?.length) {
             newMsg.embeds = [...oldMsg.embeds];
           }
