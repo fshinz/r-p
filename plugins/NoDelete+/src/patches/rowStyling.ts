@@ -1,7 +1,6 @@
 import { ReactNative } from "@vendetta/metro/common";
-import { before } from "@vendetta/patcher";
-import { rawFind } from "@shared/lib/rawFind";
-import { resolveSemanticColorSafe } from "@shared/lib/color";
+import { before, after } from "@vendetta/patcher";
+import { findByProps, findByName } from "@vendetta/metro";
 
 const TAG = "[MessageLogger]";
 
@@ -68,31 +67,38 @@ export function patchRowStyling(deletedMessages: Map<string, any>, editedMessage
     // Edited
     if (editedMessages.has(message.id)) {
       const info = editedMessages.get(message.id);
-      const editedColor = ReactNative.processColor(resolveSemanticColorSafe(["TEXT_MUTED"], "#949BA4"));
+      const editedColor = ReactNative.processColor("#949BA4");
       applyEditHistory(message, info, editedColor);
       return;
     }
   }
 
-  // Find the updateRows module
-  const isNativeUpdateRows = (m: any) =>
-    typeof m?.updateRows === "function" && m.updateRows.toString().includes("[native code]");
-
-  const updateRowsModule = rawFind(isNativeUpdateRows);
-  if (updateRowsModule) {
+  // Try NativeModules.DCDChatManager.updateRows first
+  const { NativeModules } = ReactNative;
+  if (NativeModules?.DCDChatManager?.updateRows) {
     cleanups.push(
-      before("updateRows", updateRowsModule, (args: any[]) => {
+      before("updateRows", NativeModules.DCDChatManager, (args: any[]) => {
         try {
           const rows = JSON.parse(args[1]);
           for (const row of rows) handleRow(row);
           args[1] = JSON.stringify(rows);
-        } catch {
-          // fail silently
-        }
+        } catch {}
       })
     );
   } else {
-    console.warn(TAG, "updateRows module not found – row styling disabled");
+    // Fallback: RowManager.prototype.generate
+    const RowManager = findByProps("RowManager") || findByName("RowManager");
+    if (RowManager?.prototype?.generate) {
+      cleanups.push(
+        after("generate", RowManager.prototype, (_args: any[], row: any) => {
+          try {
+            handleRow(row);
+          } catch {}
+        })
+      );
+    } else {
+      console.warn(TAG, "No row patching method found – styling disabled.");
+    }
   }
 
   return () => {
