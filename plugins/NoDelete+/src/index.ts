@@ -127,5 +127,5 @@ export default {
     showToast("Message Logger unloaded", getAssetIDByName("Check"));
   },
 
-  settings: Settings,
+  settings: settings,
 };
