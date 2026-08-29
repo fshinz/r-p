@@ -7,7 +7,7 @@ import { showToast } from "@vendetta/ui/toasts";
 import { showConfirmationAlert } from "@vendetta/ui/alerts";
 import { findByStoreName } from "@vendetta/metro";
 
-const { FormText, FormSection, FormRow } = Forms;
+const { FormText, FormSection, FormRow, FormSwitchRow } = Forms;
 let UserStore: any;
 
 export default function Settings() {
@@ -41,25 +41,21 @@ export default function Settings() {
   return (
     <ReactNative.ScrollView style={{ flex: 1 }}>
       <FormSection title="Settings">
-        <FormRow
+        <FormSwitchRow
           label="Ignore Bots"
           subLabel="Don't log messages from bots"
-          trailing={
-            <Forms.FormSwitch
-              value={storage.ignore.bots}
-              onValueChange={(v: boolean) => { storage.ignore.bots = v; }}
-            />
-          }
+          value={storage.ignore.bots}
+          onValueChange={(value: boolean) => {
+            storage.ignore.bots = value;
+          }}
         />
-        <FormRow
+        <FormSwitchRow
           label="Ignore My Own Messages"
           subLabel="Don't log deletions or edits of your own messages"
-          trailing={
-            <Forms.FormSwitch
-              value={storage.ignore.ownMessages}
-              onValueChange={(v: boolean) => { storage.ignore.ownMessages = v; }}
-            />
-          }
+          value={storage.ignore.ownMessages}
+          onValueChange={(value: boolean) => {
+            storage.ignore.ownMessages = value;
+          }}
         />
       </FormSection>
 
@@ -72,7 +68,7 @@ export default function Settings() {
         />
 
         {users.length === 0 ? (
-          <FormText style={{ padding: 10 }}>No users ignored.</FormText>
+          <FormText style={{ padding: 12 }}>No users ignored.</FormText>
         ) : (
           users.map((id: string) => {
             const user = UserStore?.getUser(id);
