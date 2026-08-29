@@ -1,5 +1,5 @@
 import { findByStoreName, findByProps } from "@vendetta/metro";
-import { FluxDispatcher, moment } from "@vendetta/metro/common";
+import { FluxDispatcher } from "@vendetta/metro/common";
 import { storage } from "@vendetta/plugin";
 import { before as patchBefore, after as patchAfter } from "@vendetta/patcher";
 import { getAssetIDByName } from "@vendetta/ui/assets";
@@ -14,17 +14,27 @@ let AuthStore: any;
 const ChannelMessages = findByProps("_channelMessages");
 const patches: (() => void)[] = [];
 
-const deletedCache = new Map<string, any>();
+// Separate live tracking from actually deleted messages
+const liveCache = new Map<string, any>();
+const deletedIds = new Set<string>(); 
 const editMap = new Map<string, string[]>();
-const MAX_CACHE_SIZE = 300;
 
+const MAX_CACHE_SIZE = 300;
 storage.ignore ??= { users: [], bots: false, ownMessages: false };
 
-function enforceCacheLimit(map: Map<any, any>, max: number) {
+function enforceMapLimit(map: Map<any, any>, max: number) {
   while (map.size > max) {
     const oldestKey = map.keys().next().value;
     if (oldestKey === undefined) break;
     map.delete(oldestKey);
+  }
+}
+
+function enforceSetLimit(set: Set<any>, max: number) {
+  while (set.size > max) {
+    const oldestKey = set.values().next().value;
+    if (oldestKey === undefined) break;
+    set.delete(oldestKey);
   }
 }
 
@@ -36,9 +46,6 @@ function cloneSnapshot(msg: any) {
     embeds: Array.isArray(msg.embeds) ? JSON.parse(JSON.stringify(msg.embeds)) : [],
     attachments: Array.isArray(msg.attachments) ? JSON.parse(JSON.stringify(msg.attachments)) : [],
     components: Array.isArray(msg.components) ? JSON.parse(JSON.stringify(msg.components)) : [],
-    sticker_items: msg.sticker_items || msg.stickerItems || [],
-    flags: msg.flags || 0,
-    deletedAt: msg.deletedAt || moment().format("HH:mm:ss"),
   };
 }
 
@@ -47,8 +54,7 @@ function reinsertDeletedMessage(channelId: string, message: any) {
   try {
     const record = ChannelMessages.get(channelId);
     if (!record) return;
-    const next = record.receiveMessage(message);
-    ChannelMessages.commit(next);
+    ChannelMessages.commit(record.receiveMessage(message));
   } catch (e) {
     console.error("[MessageLogger] Reinsert error:", e);
   }
@@ -65,22 +71,18 @@ export default {
         AuthStore?.getId?.() ||
         MessageStore?.getCurrentUser?.()?.id;
 
-      // 1. Cache incoming messages cleanly
+      // 1. Only track live messages for embed preservation
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
-          if (!event?.type) return;
-
-          if (event.type === "MESSAGE_CREATE") {
-            const msg = event.message;
-            if (!msg?.id) return;
-            deletedCache.set(msg.id, cloneSnapshot(msg));
-            enforceCacheLimit(deletedCache, MAX_CACHE_SIZE);
+          if (event?.type === "MESSAGE_CREATE" && event.message?.id) {
+            liveCache.set(event.message.id, cloneSnapshot(event.message));
+            enforceMapLimit(liveCache, MAX_CACHE_SIZE);
           }
         })
       );
 
-      // 2. Allow delete dispatch to run, then re-insert cached message immediately
+      // 2. Handle Deletions: Move from Live to Deleted, then reinsert
       patches.push(
         patchAfter("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -89,18 +91,17 @@ export default {
           if (!id || !channelId) return;
 
           const currentUserId = getCurrentUserId();
-          const cachedMsg = deletedCache.get(id) || MessageStore?.getMessage(channelId, id);
+          const cachedMsg = liveCache.get(id) || MessageStore?.getMessage(channelId, id);
           if (!cachedMsg) return;
 
           if (storage.ignore?.users?.includes(cachedMsg.author?.id)) return;
           if (storage.ignore?.bots && (cachedMsg.author?.bot || cachedMsg.author?.isNonUserBot?.())) return;
           if (storage.ignore?.ownMessages && cachedMsg.author?.id === currentUserId) return;
 
-          const snapshot = cloneSnapshot(cachedMsg);
-          deletedCache.set(id, snapshot);
+          deletedIds.add(id);
+          enforceSetLimit(deletedIds, MAX_CACHE_SIZE);
 
-          // Write back directly to ChannelMessages store, avoiding ISO error injection
-          reinsertDeletedMessage(channelId, snapshot);
+          reinsertDeletedMessage(channelId, cloneSnapshot(cachedMsg));
         })
       );
 
@@ -114,15 +115,17 @@ export default {
 
           const currentUserId = getCurrentUserId();
           for (const id of ids) {
-            const cachedMsg = deletedCache.get(id);
+            const cachedMsg = liveCache.get(id);
             if (!cachedMsg) continue;
 
             if (storage.ignore?.users?.includes(cachedMsg.author?.id)) continue;
             if (storage.ignore?.bots && (cachedMsg.author?.bot || cachedMsg.author?.isNonUserBot?.())) continue;
             if (storage.ignore?.ownMessages && cachedMsg.author?.id === currentUserId) continue;
 
-            reinsertDeletedMessage(channelId, cachedMsg);
+            deletedIds.add(id);
+            reinsertDeletedMessage(channelId, cloneSnapshot(cachedMsg));
           }
+          enforceSetLimit(deletedIds, MAX_CACHE_SIZE);
         })
       );
 
@@ -130,18 +133,11 @@ export default {
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
-          if (event?.type !== "MESSAGE_UPDATE") return;
-          if (!event?.message) return;
-
+          if (event?.type !== "MESSAGE_UPDATE" || !event?.message?.id) return;
+          
           const newMsg = event.message;
-          if (!newMsg.id || !newMsg.channel_id) return;
-
           const currentUserId = getCurrentUserId();
-          if (storage.ignore?.users?.includes(newMsg.author?.id)) return;
-          if (storage.ignore?.bots && (newMsg.author?.bot || newMsg.author?.isNonUserBot?.())) return;
-          if (storage.ignore?.ownMessages && newMsg.author?.id === currentUserId) return;
-
-          const oldMsg = MessageStore?.getMessage(newMsg.channel_id, newMsg.id) || deletedCache.get(newMsg.id);
+          const oldMsg = MessageStore?.getMessage(newMsg.channel_id, newMsg.id) || liveCache.get(newMsg.id);
 
           if (oldMsg) {
             if (oldMsg.embeds?.length && !newMsg.embeds?.length) {
@@ -152,8 +148,9 @@ export default {
             }
           }
 
-          if (!newMsg.content || newMsg.content.trim() === "") return;
-          if (!oldMsg || !oldMsg.content || oldMsg.content === newMsg.content) return;
+          if (!newMsg.content || !oldMsg?.content || oldMsg.content === newMsg.content) return;
+          if (storage.ignore?.users?.includes(newMsg.author?.id)) return;
+          if (storage.ignore?.ownMessages && newMsg.author?.id === currentUserId) return;
 
           let history = editMap.get(newMsg.id) || [];
           if (history.length === 0 || history[history.length - 1] !== oldMsg.content) {
@@ -161,32 +158,27 @@ export default {
           }
           if (history.length > 5) history = history.slice(-5);
           editMap.set(newMsg.id, history);
-          enforceCacheLimit(editMap, MAX_CACHE_SIZE);
+          enforceMapLimit(editMap, MAX_CACHE_SIZE);
         })
       );
 
-      patches.push(patchRowStyling(deletedCache, editMap));
+      // Pass the Set of IDs, not the Map of messages
+      patches.push(patchRowStyling(deletedIds, editMap));
       patches.push(patchEditStyling(editMap));
       patches.push(patchContextMenu());
 
       showToast("Message Logger loaded", getAssetIDByName("Check"));
     } catch (e) {
       console.error("[MessageLogger] Load error:", e);
-      showToast("Failed to load Message Logger", getAssetIDByName("Small"));
     }
   },
 
   onUnload() {
-    for (const unpatch of patches) {
-      try {
-        unpatch();
-      } catch (_) {}
-    }
+    for (const unpatch of patches) unpatch();
     patches.length = 0;
-    deletedCache.clear();
+    liveCache.clear();
+    deletedIds.clear();
     editMap.clear();
-    showToast("Message Logger unloaded", getAssetIDByName("Check"));
   },
-
   settings: Settings,
 };
