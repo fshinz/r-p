@@ -1,5 +1,5 @@
-
 import React from "react";
+import { ScrollView } from "react-native";
 import { findByStoreName } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
 import { useProxy } from "@vendetta/storage";
@@ -42,25 +42,27 @@ export default function Settings() {
   };
 
   return (
-    <FormSection title="Filters">
-      <FormSwitchRow
-        label="Ignore Bots"
-        subLabel="Don't log messages sent by bot accounts"
-        leading={<FormRow.Icon source={getAssetIDByName("ic_robot")} />}
-        value={!!storage.ignore.bots}
-        onValueChange={(v: boolean) => {
-          storage.ignore.bots = v;
-        }}
-      />
-      <FormSwitchRow
-        label="Ignore My Own Messages"
-        subLabel="Don't log deletions or edits of your own messages"
-        leading={<FormRow.Icon source={getAssetIDByName("ic_account_circle_24px")} />}
-        value={!!storage.ignore.ownMessages}
-        onValueChange={(v: boolean) => {
-          storage.ignore.ownMessages = v;
-        }}
-      />
+    <ScrollView style={{ flex: 1 }}>
+      <FormSection title="Filters">
+        <FormSwitchRow
+          label="Ignore Bots"
+          subLabel="Don't log messages sent by bot accounts"
+          leading={<FormRow.Icon source={getAssetIDByName("ic_robot")} />}
+          value={!!storage.ignore.bots}
+          onValueChange={(v: boolean) => {
+            storage.ignore.bots = v;
+          }}
+        />
+        <FormSwitchRow
+          label="Ignore My Own Messages"
+          subLabel="Don't log deletions or edits of your own messages"
+          leading={<FormRow.Icon source={getAssetIDByName("ic_account_circle_24px")} />}
+          value={!!storage.ignore.ownMessages}
+          onValueChange={(v: boolean) => {
+            storage.ignore.ownMessages = v;
+          }}
+        />
+      </FormSection>
 
       <FormSection title="Ignored Users">
         <FormRow
@@ -94,6 +96,6 @@ export default function Settings() {
           })
         )}
       </FormSection>
-    </FormSection>
+    </ScrollView>
   );
 }
