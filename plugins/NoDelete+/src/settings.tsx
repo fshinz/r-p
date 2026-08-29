@@ -34,7 +34,7 @@ export default function Settings() {
         storage.ignore.users = [];
         setUsers([]);
         showToast("Cleared all ignored users", getAssetIDByName("Check"));
-      }
+      },
     });
   };
 
@@ -45,9 +45,9 @@ export default function Settings() {
           label="Ignore Bots"
           subLabel="Don't log messages from bots"
           trailing={
-            <Forms.FormSwitch 
-              value={storage.ignore.bots} 
-              onValueChange={(v: boolean) => { storage.ignore.bots = v; }} 
+            <Forms.FormSwitch
+              value={storage.ignore.bots}
+              onValueChange={(v: boolean) => { storage.ignore.bots = v; }}
             />
           }
         />
@@ -60,7 +60,7 @@ export default function Settings() {
           trailing={<FormRow.Icon source={getAssetIDByName("ic_trash_24px")} />}
           onPress={handleClearUsers}
         />
-        
+
         {users.length === 0 ? (
           <FormText style={{ padding: 10 }}>No users ignored.</FormText>
         ) : (
