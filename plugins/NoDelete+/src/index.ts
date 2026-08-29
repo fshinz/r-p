@@ -11,7 +11,6 @@ import { patchRowStyling } from "./patches/rowStyling";
 let MessageStore: any;
 const patches: (() => void)[] = [];
 
-// In‑memory maps for the current session – no persistent storage, minimal overhead
 export const deletedMessages = new Map<string, { content: string; author: string; timestamp: string }>();
 export const editedMessages = new Map<string, { oldContent: string; newContent: string; timestamp: string }>();
 
@@ -43,7 +42,6 @@ export default {
     try {
       MessageStore = findByStoreName("MessageStore");
 
-      // 1. Intercept deletions
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -59,7 +57,6 @@ export default {
               author: msg.author?.username || "Unknown",
               timestamp: new Date().toLocaleTimeString(),
             });
-            // Remove after a short delay to keep map small
             setTimeout(() => deletedMessages.delete(event.id), 60000);
             return;
           }
@@ -104,10 +101,7 @@ export default {
         })
       );
 
-      // 2. Patch row styling (red text & edit tags)
       patches.push(patchRowStyling(deletedMessages, editedMessages));
-
-      // 3. Context menu for ignore
       patches.push(patchContextMenu());
 
       showToast("Message Logger loaded", getAssetIDByName("Check"));
