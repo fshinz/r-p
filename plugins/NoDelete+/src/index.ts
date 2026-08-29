@@ -12,7 +12,6 @@ let MessageStore: any;
 let AuthStore: any;
 const patches: (() => void)[] = [];
 
-// Track cached message states so SilentDelete cannot purge them from memory
 const deletedCache = new Map<string, any>();
 const editMap = new Map<string, string[]>();
 
@@ -31,68 +30,61 @@ export default {
       MessageStore = findByStoreName("MessageStore");
       AuthStore = findByStoreName("AuthenticationStore") || findByProps("getToken");
 
-      const getCurrentUserId = () => 
-        AuthStore?.getCurrentUser?.()?.id || 
-        AuthStore?.getId?.() || 
+      const getCurrentUserId = () =>
+        AuthStore?.getCurrentUser?.()?.id ||
+        AuthStore?.getId?.() ||
         MessageStore?.getCurrentUser?.()?.id;
 
-      // ── 1. CATCH NONCE-BASED REPLACEMENTS & EPHEMERAL SILENT DELETES ──
+      // ── 1. CATCH NONCE REPLACEMENT & ELIMINATE DUPLICATES ──
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
           if (!event?.type) return;
 
-          // Catch incoming messages attempting nonce overwrites
           if (event.type === "MESSAGE_CREATE") {
             const msg = event.message;
             if (!msg?.nonce || !msg?.channel_id) return;
 
             const existing = MessageStore?.getMessage(msg.channel_id, msg.nonce);
             if (existing && existing.id !== msg.id) {
-              // Cache target message before it gets overwritten
+              // Store original message content in cache
               if (!deletedCache.has(existing.id)) {
                 deletedCache.set(existing.id, {
                   ...existing,
                   deletedAt: moment().format("HH:mm:ss"),
                 });
               }
-              // Neutralize nonce to break replacement chain
+
+              // To prevent local duplicate message rendering:
+              // Dispatch a synthetic silent purge for the old local ID so Discord removes the ghost message
+              setTimeout(() => {
+                FluxDispatcher.dispatch({
+                  type: "MESSAGE_DELETE",
+                  id: existing.id,
+                  channelId: msg.channel_id,
+                  isMlDuplicateCleanup: true,
+                });
+              }, 0);
+
               delete msg.nonce;
             }
-          }
-
-          // Catch local bypasses attempting mlDeleted flags or ephemeral overrides
-          if (event.type === "MESSAGE_DELETE") {
-            const { channelId, id, mlDeleted } = event;
-            if (!id || !channelId) return;
-
-            const existing = MessageStore?.getMessage(channelId, id);
-            if (existing) {
-              // Store locally even if plugin passed mlDeleted: true
-              if (!deletedCache.has(id)) {
-                deletedCache.set(id, {
-                  ...existing,
-                  deletedAt: moment().format("HH:mm:ss"),
-                });
-              }
-            }
-            
-            // Clean custom bypass flags
-            if (mlDeleted) delete event.mlDeleted;
           }
         })
       );
 
-      // ── 2. SINGLE MESSAGE DELETE HANDLER ──
+      // ── 2. SINGLE DELETE HANDLER ──
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
           if (event?.type !== "MESSAGE_DELETE") return;
           if (!event?.id || !event?.channelId) return;
 
+          // Ignore duplicate cleanup dispatches
+          if (event.isMlDuplicateCleanup) return;
+
           const currentUserId = getCurrentUserId();
           const msg = MessageStore?.getMessage(event.channelId, event.id) || deletedCache.get(event.id);
-          
+
           if (!msg) return;
           if (storage.ignore?.users?.includes(msg.author?.id)) return;
           if (storage.ignore?.bots && msg.author?.bot) return;
@@ -101,7 +93,6 @@ export default {
           const time = deletedCache.get(event.id)?.deletedAt || moment().format("HH:mm:ss");
           const automodMessage = buildAutomodMessage(DELETED_TEXT, time);
 
-          // Force client store to render Automod tombstone instead of deleting row
           args[0] = {
             type: "MESSAGE_EDIT_FAILED_AUTOMOD",
             messageData: {
@@ -135,7 +126,7 @@ export default {
             if (storage.ignore?.users?.includes(msg.author?.id)) continue;
             if (storage.ignore?.bots && msg.author?.bot) continue;
             if (storage.ignore?.ownMessages && msg.author?.id === currentUserId) continue;
-            
+
             if (!deletedCache.has(id)) {
               deletedCache.set(id, { ...msg, deletedAt: moment().format("HH:mm:ss") });
             }
@@ -163,7 +154,7 @@ export default {
         })
       );
 
-      // ── 4. EDITS: PRESERVE HISTORY ──
+      // ── 4. EDIT HISTORY ──
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -190,7 +181,6 @@ export default {
         })
       );
 
-      // Register row and context menu patches
       patches.push(patchEditStyling(editMap));
       patches.push(patchContextMenu());
 
