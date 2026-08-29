@@ -42,7 +42,6 @@ export default {
           const existing = MessageStore?.getMessage(msg.channel_id, msg.nonce);
           if (existing && existing.id !== msg.id) {
             // This is a replacement attempt – log the original as deleted
-            // Prevent double-logging with the real delete later
             if (!deletedIds.includes(existing.id)) {
               deletedIds.push(existing.id);
               // Dispatch a synthetic delete so our delete handler processes it
