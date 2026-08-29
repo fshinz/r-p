@@ -1,7 +1,7 @@
 import { findByStoreName, findByProps } from "@vendetta/metro";
 import { FluxDispatcher, moment } from "@vendetta/metro/common";
 import { storage } from "@vendetta/plugin";
-import { before as patchBefore } from "@vendetta/patcher";
+import { before as patchBefore, after as patchAfter } from "@vendetta/patcher";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import { showToast } from "@vendetta/ui/toasts";
 import Settings from "./settings";
@@ -11,9 +11,9 @@ import { patchRowStyling } from "./patches/rowStyling";
 
 let MessageStore: any;
 let AuthStore: any;
+const ChannelMessages = findByProps("_channelMessages");
 const patches: (() => void)[] = [];
 
-// Lightweight in-memory caches
 const deletedCache = new Map<string, any>();
 const editMap = new Map<string, string[]>();
 const MAX_CACHE_SIZE = 300;
@@ -42,6 +42,18 @@ function cloneSnapshot(msg: any) {
   };
 }
 
+function reinsertDeletedMessage(channelId: string, message: any) {
+  if (!ChannelMessages || !channelId || !message) return;
+  try {
+    const record = ChannelMessages.get(channelId);
+    if (!record) return;
+    const next = record.receiveMessage(message);
+    ChannelMessages.commit(next);
+  } catch (e) {
+    console.error("[MessageLogger] Reinsert error:", e);
+  }
+}
+
 export default {
   onLoad() {
     try {
@@ -53,7 +65,7 @@ export default {
         AuthStore?.getId?.() ||
         MessageStore?.getCurrentUser?.()?.id;
 
-      // 1. Cache incoming messages to preserve embeds/attachments
+      // 1. Cache incoming messages cleanly
       patches.push(
         patchBefore("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
@@ -65,66 +77,52 @@ export default {
             deletedCache.set(msg.id, cloneSnapshot(msg));
             enforceCacheLimit(deletedCache, MAX_CACHE_SIZE);
           }
-
-          if (event.type === "MESSAGE_DELETE") {
-            const { channelId, id } = event;
-            if (!id || !channelId) return;
-            const existing = MessageStore?.getMessage(channelId, id);
-            if (existing && !deletedCache.has(id)) {
-              deletedCache.set(id, cloneSnapshot(existing));
-              enforceCacheLimit(deletedCache, MAX_CACHE_SIZE);
-            }
-          }
         })
       );
 
-      // 2. Intercept Deletions safely without dispatching auto-mod error blocks
+      // 2. Allow delete dispatch to run, then re-insert cached message immediately
       patches.push(
-        patchBefore("dispatch", FluxDispatcher, (args) => {
+        patchAfter("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
           if (event?.type !== "MESSAGE_DELETE") return;
-          if (!event?.id || !event?.channelId) return;
+          const { channelId, id } = event;
+          if (!id || !channelId) return;
 
           const currentUserId = getCurrentUserId();
-          const cachedMsg = MessageStore?.getMessage(event.channelId, event.id) || deletedCache.get(event.id);
-
+          const cachedMsg = deletedCache.get(id) || MessageStore?.getMessage(channelId, id);
           if (!cachedMsg) return;
+
           if (storage.ignore?.users?.includes(cachedMsg.author?.id)) return;
           if (storage.ignore?.bots && (cachedMsg.author?.bot || cachedMsg.author?.isNonUserBot?.())) return;
           if (storage.ignore?.ownMessages && cachedMsg.author?.id === currentUserId) return;
 
-          if (!deletedCache.has(event.id)) {
-            deletedCache.set(event.id, cloneSnapshot(cachedMsg));
-          }
+          const snapshot = cloneSnapshot(cachedMsg);
+          deletedCache.set(id, snapshot);
 
-          // Prevent Discord from removing the message row entirely
-          args[0] = { type: "NOOP" };
+          // Write back directly to ChannelMessages store, avoiding ISO error injection
+          reinsertDeletedMessage(channelId, snapshot);
         })
       );
 
-      // 3. Intercept Bulk Deletes safely
+      // 3. Handle Bulk Deletes gracefully
       patches.push(
-        patchBefore("dispatch", FluxDispatcher, (args) => {
+        patchAfter("dispatch", FluxDispatcher, (args) => {
           const event = args[0];
           if (event?.type !== "MESSAGE_DELETE_BULK") return;
-          if (!event?.ids?.length || !event?.channelId) return;
+          const { channelId, ids } = event;
+          if (!ids?.length || !channelId) return;
 
           const currentUserId = getCurrentUserId();
-          const time = moment().format("HH:mm:ss");
-
-          for (const id of event.ids) {
-            const cachedMsg = MessageStore?.getMessage(event.channelId, id) || deletedCache.get(id);
+          for (const id of ids) {
+            const cachedMsg = deletedCache.get(id);
             if (!cachedMsg) continue;
+
             if (storage.ignore?.users?.includes(cachedMsg.author?.id)) continue;
             if (storage.ignore?.bots && (cachedMsg.author?.bot || cachedMsg.author?.isNonUserBot?.())) continue;
             if (storage.ignore?.ownMessages && cachedMsg.author?.id === currentUserId) continue;
 
-            if (!deletedCache.has(id)) {
-              deletedCache.set(id, cloneSnapshot({ ...cachedMsg, deletedAt: time }));
-            }
+            reinsertDeletedMessage(channelId, cachedMsg);
           }
-
-          args[0] = { type: "NOOP" };
         })
       );
 
