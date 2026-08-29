@@ -7,6 +7,7 @@ import { showToast } from "@vendetta/ui/toasts";
 import Settings from "./settings";
 import { patchContextMenu } from "./patches/contextMenu";
 import { patchEditStyling } from "./patches/editStyling";
+import { patchEmbedFallback } from "./patches/embedFallback";
 import { addEmbedLogEntry, snapshotForLog } from "./lib/embedLog";
 
 let MessageStore: any;
@@ -16,6 +17,7 @@ const patches: (() => void)[] = [];
 // Persistent cache for deleted messages, components, embeds, and attachments
 const deletedCache = new Map<string, any>();
 const editMap = new Map<string, string[]>();
+const deletedEmbedMap = new Map<string, any[]>();
 
 storage.ignore ??= { users: [], bots: false, ownMessages: false };
 
@@ -25,107 +27,17 @@ function buildAutomodMessage(text: string, timestamp: string): string {
   return `${text} (${timestamp})`;
 }
 
-// ---- Embed rehydration helpers ----
-// MessageStore hands back an already-PARSED embed (rawTitle, colorString, etc), not the raw
-// API shape. Redispatching a parsed embed through MESSAGE_EDIT_FAILED_AUTOMOD runs it through
-// the parser a second time, which doesn't recognize the parsed field names and silently drops
-// the embed. These convert a parsed embed back into the raw shape Discord's reducer expects.
-
-function hslaStringToInt(hsla: string): number {
-  const match = hsla.match(/^hsla?\(\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*(?:,\s*[\d.]+\s*)?\)$/i);
-  if (!match) return 1974050;
-
-  const h = parseFloat(match[1]) / 360;
-  const s = parseFloat(match[2]) / 100;
-  const l = parseFloat(match[3]) / 100;
-
-  if (s === 0) {
-    const gray = Math.round(l * 255);
-    return (gray << 16) | (gray << 8) | gray;
-  }
-
-  const hueToRgb = (p: number, q: number, t: number): number => {
-    if (t < 0) t += 1;
-    if (t > 1) t -= 1;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 1 / 2) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-    return p;
-  };
-
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-  const p = 2 * l - q;
-
-  const r = Math.round(hueToRgb(p, q, h + 1 / 3) * 255);
-  const g = Math.round(hueToRgb(p, q, h) * 255);
-  const b = Math.round(hueToRgb(p, q, h - 1 / 3) * 255);
-
-  return (r << 16) | (g << 8) | b;
-}
-
-function normalizeEmbedColor(color: string | number | null | undefined): number {
-  if (color === undefined || color === null) return 1974050;
-  if (typeof color === "number") return color;
-  if (typeof color === "string" && color.startsWith("hsl")) return hslaStringToInt(color);
-  return 1974050;
-}
-
-function toRawEmbed(embed: any): any {
-  if (!embed) return embed;
-
-  const raw: any = {
-    type: embed.type,
-    url: embed.url,
-    color: normalizeEmbedColor(embed.color),
-    timestamp: embed.timestamp,
-    title: embed.rawTitle ?? (typeof embed.title === "string" ? embed.title : undefined),
-    description: embed.rawDescription ?? (typeof embed.description === "string" ? embed.description : undefined),
-    author: embed.author ? {
-      name: embed.author.name,
-      url: embed.author.url,
-      icon_url: embed.author.iconURL,
-      proxy_icon_url: embed.author.iconProxyURL,
-    } : undefined,
-    image: embed.image ? {
-      url: embed.image.url,
-      proxy_url: embed.image.proxyURL,
-      width: embed.image.width,
-      height: embed.image.height,
-    } : undefined,
-    thumbnail: embed.thumbnail ? {
-      url: embed.thumbnail.url,
-      proxy_url: embed.thumbnail.proxyURL,
-      width: embed.thumbnail.width,
-      height: embed.thumbnail.height,
-    } : undefined,
-    video: embed.video,
-    provider: embed.provider,
-    footer: embed.footer ? {
-      icon_url: embed.footer.iconURL,
-      proxy_icon_url: embed.footer.iconProxyURL,
-      ...embed.footer,
-    } : undefined,
-  };
-
-  if (Array.isArray(embed.fields)) {
-    raw.fields = embed.fields.map((field: any) => ({
-      name: field.rawName ?? (typeof field.name === "string" ? field.name : ""),
-      value: field.rawValue ?? (typeof field.value === "string" ? field.value : ""),
-      inline: field.inline,
-    }));
-  }
-
-  return raw;
-}
-
-// Deep clone helper for components, embeds, and raw payload structures
+// Deep clone helper for components, embeds, and raw payload structures.
+// Embeds themselves don't survive redispatch through MESSAGE_EDIT_FAILED_AUTOMOD (confirmed -
+// the automod display path drops them regardless of raw vs parsed shape), so they're cloned
+// here only so deletedEmbedMap has data for the row-content fallback. Content/attachments/
+// components DO survive automod fine and still go through it as before.
 function cloneSnapshot(msg: any) {
   if (!msg) return null;
-  const embeds = Array.isArray(msg.embeds) ? msg.embeds.map(toRawEmbed) : [];
   return {
     ...msg,
     content: msg.content || "",
-    embeds,
+    embeds: Array.isArray(msg.embeds) ? JSON.parse(JSON.stringify(msg.embeds)) : [],
     components: Array.isArray(msg.components) ? JSON.parse(JSON.stringify(msg.components)) : [],
     attachments: Array.isArray(msg.attachments) ? JSON.parse(JSON.stringify(msg.attachments)) : [],
     flags: msg.flags || 0,
@@ -150,7 +62,6 @@ export default {
           const event = args[0];
           if (!event?.type) return;
 
-          // Catch incoming messages attempting nonce overwrites
           if (event.type === "MESSAGE_CREATE") {
             const msg = event.message;
             if (!msg?.nonce || !msg?.channel_id) return;
@@ -167,7 +78,6 @@ export default {
             }
           }
 
-          // Catch local delete events and snapshot full state
           if (event.type === "MESSAGE_DELETE") {
             const { channelId, id, mlDeleted } = event;
             if (!id || !channelId) return;
@@ -204,10 +114,13 @@ export default {
           const snapshot = deletedCache.get(event.id);
           addEmbedLogEntry(snapshotForLog(snapshot, "deleted"));
 
+          if (snapshot?.embeds?.length) {
+            deletedEmbedMap.set(event.id, snapshot.embeds);
+          }
+
           const time = snapshot?.deletedAt || moment().format("HH:mm:ss");
           const automodMessage = buildAutomodMessage(DELETED_TEXT, time);
 
-          // Force full rehydration of both components AND legacy embeds
           args[0] = {
             type: "MESSAGE_EDIT_FAILED_AUTOMOD",
             messageData: {
@@ -257,6 +170,11 @@ export default {
 
             const snapshot = deletedCache.get(id);
             addEmbedLogEntry(snapshotForLog(snapshot, "deleted"));
+
+            if (snapshot?.embeds?.length) {
+              deletedEmbedMap.set(id, snapshot.embeds);
+            }
+
             validCount++;
 
             FluxDispatcher.dispatch({
@@ -304,12 +222,10 @@ export default {
 
           const oldMsg = MessageStore?.getMessage(newMsg.channel_id, newMsg.id) || deletedCache.get(newMsg.id);
 
-          // Restore legacy embeds if stripped by edit
           if (oldMsg && oldMsg.embeds?.length && !newMsg.embeds?.length) {
             newMsg.embeds = JSON.parse(JSON.stringify(oldMsg.embeds));
           }
 
-          // Restore components if stripped by edit
           if (oldMsg && oldMsg.components?.length && !newMsg.components?.length) {
             newMsg.components = JSON.parse(JSON.stringify(oldMsg.components));
           }
@@ -329,6 +245,7 @@ export default {
       );
 
       patches.push(patchEditStyling(editMap));
+      patches.push(patchEmbedFallback(deletedEmbedMap));
       patches.push(patchContextMenu());
 
       showToast("Message Logger loaded", getAssetIDByName("Check"));
@@ -347,6 +264,7 @@ export default {
     patches.length = 0;
     deletedCache.clear();
     editMap.clear();
+    deletedEmbedMap.clear();
     showToast("Message Logger unloaded", getAssetIDByName("Check"));
   },
 
