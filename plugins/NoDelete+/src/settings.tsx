@@ -1,4 +1,4 @@
-import React from "react";
+import { React } from "@vendetta/metro/common";
 import { findByProps, findByStoreName } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
 import { useProxy } from "@vendetta/storage";
@@ -9,9 +9,10 @@ import { Forms } from "@vendetta/ui/components";
 
 const { FormText, FormRow, FormSwitchRow, FormSection } = Forms;
 
-// Safe Metro resolvers with native Vendetta fallbacks
-const TableRowGroupModule = findByProps("TableRowGroup") || findByProps("TableGroup");
-const TableRowGroupComponent = TableRowGroupModule?.TableRowGroup || TableRowGroupModule?.TableGroup || FormSection;
+const TableRowGroupComponent =
+  findByProps("TableRowGroup")?.TableRowGroup ||
+  findByProps("TableGroup")?.TableGroup ||
+  FormSection;
 
 const TableSwitchRowComponent =
   findByProps("TableSwitchRow")?.TableSwitchRow ||
@@ -34,7 +35,11 @@ export default function Settings() {
   UserStore ??= findByStoreName("UserStore");
   useProxy(storage);
 
+  // Initialize storage defaults safely
   storage.ignore ??= { users: [], bots: false, ownMessages: false };
+  storage.logEdits ??= true;
+  storage.showToast ??= false;
+
   const [users, setUsers] = React.useState<string[]>(storage.ignore.users || []);
 
   const handleRemoveUser = (userId: string) => {
@@ -67,6 +72,25 @@ export default function Settings() {
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 10 }}>
       <Stack spacing={8}>
+        <TableRowGroup title="General Settings">
+          <TableSwitchRow
+            label="Log Edited Messages"
+            subLabel="Track edit history and original message content"
+            value={!!storage.logEdits}
+            onValueChange={(v: boolean) => {
+              storage.logEdits = v;
+            }}
+          />
+          <TableSwitchRow
+            label="Show Load Toast"
+            subLabel="Display a toast notification when plugin is loaded"
+            value={!!storage.showToast}
+            onValueChange={(v: boolean) => {
+              storage.showToast = v;
+            }}
+          />
+        </TableRowGroup>
+
         <TableRowGroup title="Filters">
           <TableSwitchRow
             label="Ignore Bots"
