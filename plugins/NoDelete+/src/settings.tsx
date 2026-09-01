@@ -41,19 +41,12 @@ export default function Settings() {
 
   const [users, setUsers] = React.useState<string[]>(storage.ignore.users || []);
 
-  const handleRemoveUser = (userId: string) => {
-    const newArr = users.filter((id: string) => id !== userId);
-    storage.ignore.users = newArr;
-    setUsers(newArr);
-    showToast("User removed from ignore list", getAssetIDByName("Check"));
-  };
-
   const handleClearUsers = () => {
     if (users.length === 0) return;
     showConfirmationAlert({
       title: "Clear Ignored Users",
-      content: `Remove all ${users.length} users from ignore list?`,
-      confirmText: "Clear",
+      content: `Remove all ${users.length} users from the ignore list?`,
+      confirmText: "Clear All",
       cancelText: "Cancel",
       onConfirm: () => {
         storage.ignore.users = [];
@@ -113,7 +106,7 @@ export default function Settings() {
           {users.length > 0 && (
             <FormRow
               label="Clear Ignored List"
-              subLabel="Remove all currently ignored users"
+              subLabel="Mass remove all currently ignored users"
               trailing={<FormRow.Icon source={getAssetIDByName("ic_trash_24px")} />}
               onPress={handleClearUsers}
             />
@@ -131,13 +124,9 @@ export default function Settings() {
                 <FormRow
                   key={id}
                   label={name}
-                  subLabel={`ID: ${id}`}
-                  trailing={
-                    <FormRow.Icon
-                      source={getAssetIDByName("ic_close_24px")}
-                      onPress={() => handleRemoveUser(id)}
-                    />
-                  }
+                  subLabel={`User ID: ${id}`}
+                  leading={<FormRow.Icon source={getAssetIDByName("ic_member")} />}
+                  trailing={<FormRow.Icon source={getAssetIDByName("ic_close_24px")} />}
                 />
               );
             })
