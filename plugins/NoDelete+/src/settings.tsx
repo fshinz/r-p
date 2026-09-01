@@ -35,7 +35,6 @@ export default function Settings() {
   UserStore ??= findByStoreName("UserStore");
   useProxy(storage);
 
-  // Initialize storage defaults safely
   storage.ignore ??= { users: [], bots: false, ownMessages: false };
   storage.logEdits ??= true;
   storage.showToast ??= false;
@@ -110,16 +109,20 @@ export default function Settings() {
           />
         </TableRowGroup>
 
-        <TableRowGroup title="Ignored Users">
-          <FormRow
-            label="Clear All"
-            subLabel={`${users.length} users ignored`}
-            trailing={<FormRow.Icon source={getAssetIDByName("ic_trash_24px")} />}
-            onPress={handleClearUsers}
-          />
+        <TableRowGroup title={`Ignored Users (${users.length})`}>
+          {users.length > 0 && (
+            <FormRow
+              label="Clear Ignored List"
+              subLabel="Remove all currently ignored users"
+              trailing={<FormRow.Icon source={getAssetIDByName("ic_trash_24px")} />}
+              onPress={handleClearUsers}
+            />
+          )}
 
           {users.length === 0 ? (
-            <FormText style={{ padding: 12 }}>No users ignored.</FormText>
+            <FormText style={{ padding: 16, opacity: 0.6 }}>
+              No users are currently ignored.
+            </FormText>
           ) : (
             users.map((id: string) => {
               const user = UserStore?.getUser(id);
@@ -128,6 +131,7 @@ export default function Settings() {
                 <FormRow
                   key={id}
                   label={name}
+                  subLabel={`ID: ${id}`}
                   trailing={
                     <FormRow.Icon
                       source={getAssetIDByName("ic_close_24px")}
