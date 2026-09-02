@@ -77,9 +77,7 @@ export default {
           const msg = event.message;
           if (!msg?.channel_id) return;
 
-          const currentUserId = getCurrentUserId();
-          if (msg.author?.id === currentUserId) return;
-
+          // Standard message nonce deduplication
           if (msg.nonce) {
             const existing = MessageStore?.getMessage(msg.channel_id, msg.nonce);
             if (existing && existing.id !== msg.id) {
@@ -90,7 +88,7 @@ export default {
             }
           }
 
-          // Command / Interaction Nonce Matching & Deduplication
+          // Command / Interaction Nonce Deduplication (Runs for ALL authors including yourself)
           const interactionId =
             msg.interaction_metadata?.id ||
             msg.interaction?.id ||
@@ -99,7 +97,6 @@ export default {
           if (interactionId) {
             const existingCmdMessageId = commandMap.get(String(interactionId));
             
-            // Check if this command response was already dispatched under a previous ID
             if (existingCmdMessageId && existingCmdMessageId !== msg.id) {
               const existingMsg = MessageStore?.getMessage(msg.channel_id, existingCmdMessageId);
               if (existingMsg && !deletedCache.has(existingCmdMessageId)) {
