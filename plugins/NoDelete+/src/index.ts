@@ -90,12 +90,28 @@ export default {
             }
           }
 
-          const interactionId = msg.interaction_metadata?.id || msg.interaction?.id;
+          // Command / Interaction Nonce Matching & Deduplication
+          const interactionId =
+            msg.interaction_metadata?.id ||
+            msg.interaction?.id ||
+            msg.nonce;
+
           if (interactionId) {
-            commandMap.set(String(interactionId), String(msg.id));
-            if (commandMap.size > 1000) {
-              const firstKey = commandMap.keys().next().value;
-              if (firstKey) commandMap.delete(firstKey);
+            const existingCmdMessageId = commandMap.get(String(interactionId));
+            
+            // Check if this command response was already dispatched under a previous ID
+            if (existingCmdMessageId && existingCmdMessageId !== msg.id) {
+              const existingMsg = MessageStore?.getMessage(msg.channel_id, existingCmdMessageId);
+              if (existingMsg && !deletedCache.has(existingCmdMessageId)) {
+                deletedCache.set(existingCmdMessageId, cloneSnapshot(existingMsg));
+              }
+              delete msg.nonce;
+            } else {
+              commandMap.set(String(interactionId), String(msg.id));
+              if (commandMap.size > 1000) {
+                const firstKey = commandMap.keys().next().value;
+                if (firstKey) commandMap.delete(firstKey);
+              }
             }
           }
 
