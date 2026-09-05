@@ -1,11 +1,12 @@
-import { React } from "@vendetta/metro/common";
+import { React, stylesheet } from "@vendetta/metro/common";
 import { findByProps } from "@vendetta/metro";
+import { semanticColors } from "@vendetta/ui/color";
+import { Forms } from "@vendetta/ui/components";
 import {
   View,
   Text,
   TouchableOpacity,
   FlatList,
-  StyleSheet,
 } from "react-native";
 import {
   getNotifications,
@@ -13,6 +14,8 @@ import {
   clearAllNotifications,
 } from "../notifications";
 import type { NotificationCategory, NotificationItem } from "../types";
+
+const { FormRow, FormDivider } = Forms;
 
 const ChannelNavigation = findByProps("selectChannel", "jumpToMessage");
 const NavigationNative = findByProps("navigate", "push");
@@ -26,6 +29,85 @@ const CATEGORIES: { id: NotificationCategory | "all"; label: string }[] = [
   { id: "threads", label: "Threads" },
   { id: "other", label: "Other" },
 ];
+
+const styles = stylesheet.createThemedStyleSheet({
+  container: {
+    flex: 1,
+    backgroundColor: semanticColors.BACKGROUND_PRIMARY,
+  },
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: semanticColors.BACKGROUND_MODIFIER_ACCENT,
+  },
+  headerTitle: {
+    color: semanticColors.HEADER_PRIMARY,
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  clearButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 4,
+    backgroundColor: semanticColors.STATUS_DANGER_BACKGROUND,
+  },
+  clearText: {
+    color: semanticColors.WHITE,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  tabBar: {
+    borderBottomWidth: 1,
+    borderBottomColor: semanticColors.BACKGROUND_MODIFIER_ACCENT,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  tab: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: semanticColors.BACKGROUND_SECONDARY,
+    marginRight: 8,
+  },
+  activeTab: {
+    backgroundColor: semanticColors.BG_BRAND,
+  },
+  tabText: {
+    color: semanticColors.INTERACTIVE_MUTED,
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  activeTabText: {
+    color: semanticColors.WHITE,
+    fontWeight: "600",
+  },
+  cardTitle: {
+    color: semanticColors.HEADER_PRIMARY,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  cardSubLabel: {
+    color: semanticColors.TEXT_MUTED,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  timestamp: {
+    color: semanticColors.TEXT_MUTED,
+    fontSize: 11,
+  },
+  emptyContainer: {
+    padding: 32,
+    alignItems: "center",
+  },
+  emptyText: {
+    color: semanticColors.TEXT_MUTED,
+    fontSize: 14,
+  },
+});
 
 export default function NotificationCenterUI() {
   const [items, setItems] = React.useState<NotificationItem[]>(getNotifications());
@@ -67,30 +149,31 @@ export default function NotificationCenterUI() {
     }
   };
 
-  const renderItem = ({ item }: { item: NotificationItem }) => (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() => jumpToMessage(item)}
-      activeOpacity={0.7}
-    >
-      <View style={styles.cardHeader}>
-        <Text style={styles.title} numberOfLines={1}>
-          {item.title}
-        </Text>
-        <Text style={styles.timestamp}>{item.timestamp}</Text>
-      </View>
-      {Boolean(item.content) && (
-        <Text style={styles.content} numberOfLines={2}>
-          {item.content}
-        </Text>
-      )}
-      <View style={styles.cardFooter}>
-        <Text style={styles.location} numberOfLines={1}>
-          {item.guildName ? `${item.guildName} • ${item.channelName}` : item.channelName}
-        </Text>
-      </View>
-    </TouchableOpacity>
-  );
+  const renderItem = ({ item }: { item: NotificationItem }) => {
+    const location = item.guildName
+      ? `${item.guildName} • ${item.channelName}`
+      : item.channelName;
+
+    return (
+      <FormRow
+        label={<Text style={styles.cardTitle}>{item.title}</Text>}
+        subLabel={
+          <View>
+            {Boolean(item.content) && (
+              <Text style={styles.cardSubLabel} numberOfLines={2}>
+                {item.content}
+              </Text>
+            )}
+            <Text style={styles.cardSubLabel} numberOfLines={1}>
+              {location}
+            </Text>
+          </View>
+        }
+        trailing={<Text style={styles.timestamp}>{item.timestamp}</Text>}
+        onPress={() => jumpToMessage(item)}
+      />
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -127,7 +210,7 @@ export default function NotificationCenterUI() {
         data={filteredItems}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
-        contentContainerStyle={styles.listContent}
+        ItemSeparatorComponent={() => <FormDivider />}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>No notifications here yet</Text>
@@ -137,106 +220,3 @@ export default function NotificationCenterUI() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#1e1f22",
-  },
-  topBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#2b2d31",
-  },
-  headerTitle: {
-    color: "#f2f3f5",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  clearButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 4,
-    backgroundColor: "#da373c",
-  },
-  clearText: {
-    color: "#ffffff",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  tabBar: {
-    borderBottomWidth: 1,
-    borderBottomColor: "#2b2d31",
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-  },
-  tab: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: "#2b2d31",
-    marginRight: 8,
-  },
-  activeTab: {
-    backgroundColor: "#5865f2",
-  },
-  tabText: {
-    color: "#949ba4",
-    fontSize: 13,
-    fontWeight: "500",
-  },
-  activeTabText: {
-    color: "#ffffff",
-    fontWeight: "600",
-  },
-  listContent: {
-    padding: 12,
-  },
-  card: {
-    backgroundColor: "#2b2d31",
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
-  },
-  cardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 4,
-  },
-  title: {
-    color: "#f2f3f5",
-    fontSize: 14,
-    fontWeight: "600",
-    flex: 1,
-    marginRight: 8,
-  },
-  timestamp: {
-    color: "#949ba4",
-    fontSize: 11,
-  },
-  content: {
-    color: "#dbdee1",
-    fontSize: 13,
-    marginBottom: 6,
-  },
-  cardFooter: {
-    marginTop: 2,
-  },
-  location: {
-    color: "#949ba4",
-    fontSize: 11,
-  },
-  emptyContainer: {
-    padding: 32,
-    alignItems: "center",
-  },
-  emptyText: {
-    color: "#949ba4",
-    fontSize: 14,
-  },
-});
