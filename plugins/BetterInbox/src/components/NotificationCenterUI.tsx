@@ -1,6 +1,5 @@
 import { React, stylesheet } from "@vendetta/metro/common";
 import { findByProps } from "@vendetta/metro";
-import { semanticColors } from "@vendetta/ui/color";
 import { Forms } from "@vendetta/ui/components";
 import {
   View,
@@ -16,6 +15,10 @@ import {
 import type { NotificationCategory, NotificationItem } from "../types";
 
 const { FormRow, FormDivider } = Forms;
+
+// Fallback lookup for Theme / Semantic Colors across Vendetta, Revenge, and Pyoncord
+const ColorModule = findByProps("semanticColors", "rawColors") || findByProps("ThemeColorMap");
+const semanticColors = ColorModule?.semanticColors ?? ColorModule ?? {};
 
 const ChannelNavigation = findByProps("selectChannel", "jumpToMessage");
 const NavigationNative = findByProps("navigate", "push");
@@ -33,7 +36,7 @@ const CATEGORIES: { id: NotificationCategory | "all"; label: string }[] = [
 const styles = stylesheet.createThemedStyleSheet({
   container: {
     flex: 1,
-    backgroundColor: semanticColors.BACKGROUND_PRIMARY,
+    backgroundColor: semanticColors?.BACKGROUND_PRIMARY ?? "#1e1f22",
   },
   topBar: {
     flexDirection: "row",
@@ -42,10 +45,10 @@ const styles = stylesheet.createThemedStyleSheet({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: semanticColors.BACKGROUND_MODIFIER_ACCENT,
+    borderBottomColor: semanticColors?.BACKGROUND_MODIFIER_ACCENT ?? "#2b2d31",
   },
   headerTitle: {
-    color: semanticColors.HEADER_PRIMARY,
+    color: semanticColors?.HEADER_PRIMARY ?? "#f2f3f5",
     fontSize: 18,
     fontWeight: "bold",
   },
@@ -53,16 +56,16 @@ const styles = stylesheet.createThemedStyleSheet({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 4,
-    backgroundColor: semanticColors.STATUS_DANGER_BACKGROUND,
+    backgroundColor: semanticColors?.STATUS_DANGER_BACKGROUND ?? "#da373c",
   },
   clearText: {
-    color: semanticColors.WHITE,
+    color: "#ffffff",
     fontSize: 12,
     fontWeight: "600",
   },
   tabBar: {
     borderBottomWidth: 1,
-    borderBottomColor: semanticColors.BACKGROUND_MODIFIER_ACCENT,
+    borderBottomColor: semanticColors?.BACKGROUND_MODIFIER_ACCENT ?? "#2b2d31",
     paddingVertical: 10,
     paddingHorizontal: 12,
   },
@@ -70,33 +73,33 @@ const styles = stylesheet.createThemedStyleSheet({
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 16,
-    backgroundColor: semanticColors.BACKGROUND_SECONDARY,
+    backgroundColor: semanticColors?.BACKGROUND_SECONDARY ?? "#2b2d31",
     marginRight: 8,
   },
   activeTab: {
-    backgroundColor: semanticColors.BG_BRAND,
+    backgroundColor: semanticColors?.BG_BRAND ?? "#5865f2",
   },
   tabText: {
-    color: semanticColors.INTERACTIVE_MUTED,
+    color: semanticColors?.INTERACTIVE_MUTED ?? "#949ba4",
     fontSize: 13,
     fontWeight: "500",
   },
   activeTabText: {
-    color: semanticColors.WHITE,
+    color: "#ffffff",
     fontWeight: "600",
   },
   cardTitle: {
-    color: semanticColors.HEADER_PRIMARY,
+    color: semanticColors?.HEADER_PRIMARY ?? "#f2f3f5",
     fontSize: 14,
     fontWeight: "600",
   },
   cardSubLabel: {
-    color: semanticColors.TEXT_MUTED,
+    color: semanticColors?.TEXT_MUTED ?? "#949ba4",
     fontSize: 12,
     marginTop: 2,
   },
   timestamp: {
-    color: semanticColors.TEXT_MUTED,
+    color: semanticColors?.TEXT_MUTED ?? "#949ba4",
     fontSize: 11,
   },
   emptyContainer: {
@@ -104,7 +107,7 @@ const styles = stylesheet.createThemedStyleSheet({
     alignItems: "center",
   },
   emptyText: {
-    color: semanticColors.TEXT_MUTED,
+    color: semanticColors?.TEXT_MUTED ?? "#949ba4",
     fontSize: 14,
   },
 });
