@@ -7,28 +7,28 @@ import SettingsUI from "./components/SettingsUI";
 let unpatchYouBar: (() => void) | null = null;
 let watcherInterval: ReturnType<typeof setInterval> | null = null;
 
-function forceAppRefresh() {
-    // Triggers a subtle UI re-render on the active screen stack without logging out
-    const AppRenderStore = findByProps("emitChange", "addChangeListener");
-    if (AppRenderStore?.emitChange) {
-        AppRenderStore.emitChange();
+function hardReloadApp() {
+    const BundleUpdaterModule = findByProps("reload", "supportsNativeInterface") ?? findByProps("reload");
+    const DevMenuModule = findByProps("reload", "toggle");
+
+    if (typeof BundleUpdaterModule?.reload === "function") {
+        BundleUpdaterModule.reload();
+    } else if (typeof DevMenuModule?.reload === "function") {
+        DevMenuModule.reload();
     }
 }
 
-function attemptPatch() {
+function attemptPatch(): boolean {
     if (unpatchYouBar) return true;
 
     try {
         const cleanup = patchYouBar();
         if (typeof cleanup === "function") {
             unpatchYouBar = cleanup;
-            
-            // Force React to re-evaluate current view tree so YouBar updates without switching accounts
-            setTimeout(forceAppRefresh, 100);
             return true;
         }
     } catch (e) {
-        console.error("[BetterInbox] Patch error:", e);
+        console.error("[BetterInbox] Failed patching YouBar:", e);
     }
     return false;
 }
@@ -41,15 +41,14 @@ export default {
 
         initNotificationEngine();
 
-        // 1. Immediate attempt
-        if (!attemptPatch()) {
-            // 2. Poll rapidly during startup until Metro loads YouBar
+        const patchedImmediately = attemptPatch();
+
+        if (!patchedImmediately) {
             let attempts = 0;
             watcherInterval = setInterval(() => {
                 attempts++;
                 const success = attemptPatch();
-                
-                // Stop watching after successful patch or 10 seconds cutoff
+
                 if (success || attempts > 40) {
                     if (watcherInterval) clearInterval(watcherInterval);
                     watcherInterval = null;
@@ -70,7 +69,6 @@ export default {
         }
 
         stopNotificationEngine();
-        forceAppRefresh();
     },
 
     settings: SettingsUI,
