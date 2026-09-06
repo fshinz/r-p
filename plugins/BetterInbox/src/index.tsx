@@ -3,44 +3,48 @@ import { patchYouBar } from "./youbar";
 import { initNotificationEngine, stopNotificationEngine } from "./notifications";
 import SettingsUI from "./components/SettingsUI";
 
-let unpatchButtons: (() => void) | null = null;
-let retryInterval: any = null;
+let unpatchYouBar: (() => void) | null = null;
+let watcherInterval: ReturnType<typeof setInterval> | null = null;
+
+function startYouBarWatcher() {
+    watcherInterval = setInterval(() => {
+        // If not already patched, attempt to locate and patch YouBarNotificationsButton
+        if (!unpatchYouBar) {
+            try {
+                const cleanup = patchYouBar();
+                if (typeof cleanup === "function") {
+                    unpatchYouBar = cleanup;
+                }
+            } catch (e) {
+                console.error("[BetterInbox] Failed patching YouBar:", e);
+            }
+        }
+    }, 250);
+}
 
 export default {
-  onLoad: () => {
-    storage.showDMButton ??= false;
-    storage.showSettingsButton ??= true;
-    storage.showInboxButton ??= true;
-    storage.notifications ??= [];
+    onLoad: () => {
+        storage.showDMButton ??= false;
+        storage.showSettingsButton ??= true;
+        storage.showInboxButton ??= true;
 
-    initNotificationEngine();
+        initNotificationEngine();
+        startYouBarWatcher();
+    },
 
-    const tryPatch = () => {
-      if (unpatchButtons) return;
-      try {
-        const cleanup = patchYouBar();
-        if (typeof cleanup === "function") {
-          unpatchButtons = cleanup;
-          if (retryInterval) clearInterval(retryInterval);
+    onUnload: () => {
+        if (watcherInterval) {
+            clearInterval(watcherInterval);
+            watcherInterval = null;
         }
-      } catch (e) {
-        console.error("[BetterInbox] Failed to patch YouBar:", e);
-      }
-    };
 
-    tryPatch();
-    let ticks = 0;
-    retryInterval = setInterval(() => {
-      tryPatch();
-      if (++ticks >= 60 && retryInterval) clearInterval(retryInterval);
-    }, 250);
-  },
+        if (unpatchYouBar) {
+            unpatchYouBar();
+            unpatchYouBar = null;
+        }
 
-  onUnload: () => {
-    if (retryInterval) clearInterval(retryInterval);
-    if (unpatchButtons) unpatchButtons();
-    stopNotificationEngine();
-  },
+        stopNotificationEngine();
+    },
 
-  settings: SettingsUI,
+    settings: SettingsUI,
 };
