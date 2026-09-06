@@ -6,6 +6,7 @@ import {
   Text,
   TouchableOpacity,
   FlatList,
+  ScrollView,
 } from "react-native";
 import {
   getNotifications,
@@ -14,9 +15,7 @@ import {
 } from "../notifications";
 import type { NotificationCategory, NotificationItem } from "../types";
 
-const { FormRow, FormDivider } = Forms;
-
-// Fallback lookup for Theme / Semantic Colors across Vendetta, Revenge, and Pyoncord
+// Dynamic lookup for Discord semantic theme colors
 const ColorModule = findByProps("semanticColors", "rawColors") || findByProps("ThemeColorMap");
 const semanticColors = ColorModule?.semanticColors ?? ColorModule ?? {};
 
@@ -38,72 +37,97 @@ const styles = stylesheet.createThemedStyleSheet({
     flex: 1,
     backgroundColor: semanticColors?.BACKGROUND_PRIMARY ?? "#1e1f22",
   },
-  topBar: {
+  headerSection: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: semanticColors?.BACKGROUND_MODIFIER_ACCENT ?? "#2b2d31",
+    paddingTop: 12,
+    paddingBottom: 8,
   },
   headerTitle: {
-    color: semanticColors?.HEADER_PRIMARY ?? "#f2f3f5",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  clearButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 4,
-    backgroundColor: semanticColors?.STATUS_DANGER_BACKGROUND ?? "#da373c",
+    color: semanticColors?.HEADER_PRIMARY ?? "#ffffff",
+    fontSize: 20,
+    fontWeight: "700",
   },
   clearText: {
-    color: "#ffffff",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  tabBar: {
-    borderBottomWidth: 1,
-    borderBottomColor: semanticColors?.BACKGROUND_MODIFIER_ACCENT ?? "#2b2d31",
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-  },
-  tab: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: semanticColors?.BACKGROUND_SECONDARY ?? "#2b2d31",
-    marginRight: 8,
-  },
-  activeTab: {
-    backgroundColor: semanticColors?.BG_BRAND ?? "#5865f2",
-  },
-  tabText: {
-    color: semanticColors?.INTERACTIVE_MUTED ?? "#949ba4",
-    fontSize: 13,
-    fontWeight: "500",
-  },
-  activeTabText: {
-    color: "#ffffff",
-    fontWeight: "600",
-  },
-  cardTitle: {
-    color: semanticColors?.HEADER_PRIMARY ?? "#f2f3f5",
+    color: semanticColors?.TEXT_DANGER ?? "#f23f43",
     fontSize: 14,
     fontWeight: "600",
   },
-  cardSubLabel: {
-    color: semanticColors?.TEXT_MUTED ?? "#949ba4",
-    fontSize: 12,
-    marginTop: 2,
+  pillsContainer: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  pill: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: semanticColors?.BACKGROUND_SECONDARY_ALT ?? "#2b2d31",
+  },
+  activePill: {
+    backgroundColor: semanticColors?.BG_BRAND ?? "#5865f2",
+  },
+  pillText: {
+    color: semanticColors?.INTERACTIVE_NORMAL ?? "#949ba4",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  activePillText: {
+    color: "#ffffff",
+  },
+  listContent: {
+    paddingHorizontal: 12,
+    paddingBottom: 20,
+  },
+  // Card styling that matches Discord's native card containers
+  card: {
+    backgroundColor: semanticColors?.BACKGROUND_SECONDARY ?? "#2b2d31",
+    borderRadius: 12,
+    marginVertical: 4,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: semanticColors?.BACKGROUND_MODIFIER_ACCENT ?? "rgba(255, 255, 255, 0.05)",
+  },
+  cardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: semanticColors?.BACKGROUND_SECONDARY_ALT ?? "#1e1f22",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  cardTitle: {
+    color: semanticColors?.HEADER_PRIMARY ?? "#ffffff",
+    fontSize: 14,
+    fontWeight: "600",
+    flex: 1,
+    marginRight: 8,
   },
   timestamp: {
     color: semanticColors?.TEXT_MUTED ?? "#949ba4",
     fontSize: 11,
   },
+  cardBody: {
+    padding: 12,
+  },
+  cardContent: {
+    color: semanticColors?.TEXT_NORMAL ?? "#dbdee1",
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 6,
+  },
+  cardFooter: {
+    marginTop: 2,
+  },
+  location: {
+    color: semanticColors?.TEXT_MUTED ?? "#949ba4",
+    fontSize: 11,
+    fontWeight: "500",
+  },
   emptyContainer: {
-    padding: 32,
+    padding: 40,
     alignItems: "center",
   },
   emptyText: {
@@ -158,62 +182,71 @@ export default function NotificationCenterUI() {
       : item.channelName;
 
     return (
-      <FormRow
-        label={<Text style={styles.cardTitle}>{item.title}</Text>}
-        subLabel={
-          <View>
-            {Boolean(item.content) && (
-              <Text style={styles.cardSubLabel} numberOfLines={2}>
-                {item.content}
-              </Text>
-            )}
-            <Text style={styles.cardSubLabel} numberOfLines={1}>
+      <TouchableOpacity
+        style={styles.card}
+        onPress={() => jumpToMessage(item)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardTitle} numberOfLines={1}>
+            {item.title}
+          </Text>
+          <Text style={styles.timestamp}>{item.timestamp}</Text>
+        </View>
+
+        <View style={styles.cardBody}>
+          {Boolean(item.content) && (
+            <Text style={styles.cardContent} numberOfLines={2}>
+              {item.content}
+            </Text>
+          )}
+          <View style={styles.cardFooter}>
+            <Text style={styles.location} numberOfLines={1}>
               {location}
             </Text>
           </View>
-        }
-        trailing={<Text style={styles.timestamp}>{item.timestamp}</Text>}
-        onPress={() => jumpToMessage(item)}
-      />
+        </View>
+      </TouchableOpacity>
     );
   };
 
   return (
     <View style={styles.container}>
-      <View style={styles.topBar}>
+      <View style={styles.headerSection}>
         <Text style={styles.headerTitle}>Notification Center</Text>
-        <TouchableOpacity style={styles.clearButton} onPress={clearAllNotifications}>
-          <Text style={styles.clearText}>Clear</Text>
+        <TouchableOpacity onPress={clearAllNotifications}>
+          <Text style={styles.clearText}>Clear All</Text>
         </TouchableOpacity>
       </View>
 
-      <View style={styles.tabBar}>
-        <FlatList
+      <View>
+        <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          data={CATEGORIES}
-          keyExtractor={(cat) => cat.id}
-          renderItem={({ item: cat }) => {
+          contentContainerStyle={styles.pillsContainer}
+        >
+          {CATEGORIES.map((cat) => {
             const active = activeTab === cat.id;
             return (
               <TouchableOpacity
-                style={[styles.tab, active && styles.activeTab]}
+                key={cat.id}
+                style={[styles.pill, active && styles.activePill]}
                 onPress={() => setActiveTab(cat.id as any)}
               >
-                <Text style={[styles.tabText, active && styles.activeTabText]}>
+                <Text style={[styles.pillText, active && styles.activePillText]}>
                   {cat.label}
                 </Text>
               </TouchableOpacity>
             );
-          }}
-        />
+          })}
+        </ScrollView>
       </View>
 
       <FlatList
         data={filteredItems}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
-        ItemSeparatorComponent={() => <FormDivider />}
+        contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>No notifications here yet</Text>
