@@ -1,4 +1,4 @@
-import { findByTypeName } from "@vendetta/metro";
+import { findByProps, findByName } from "@vendetta/metro";
 import { React } from "@vendetta/metro/common";
 import { after } from "@vendetta/patcher";
 import { storage } from "@vendetta/plugin";
@@ -6,16 +6,36 @@ import { useProxy } from "@vendetta/storage";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 
-// Wrapper component to subscribe to Vendetta storage updates dynamically across transitions
-function YouBarCustomButtons({ originalButton }: { originalButton: any }) {
+// Component that safely hooks into React lifecycle and storage
+function YouBarCustomButtons({ originalProps, IconButton }: any) {
     useProxy(storage);
 
     const BellIcon = getAssetIDByName("BellIcon") || getAssetIDByName("NotificationBellIcon");
     const SettingsIcon = getAssetIDByName("SettingsIcon");
     const ChatIcon = getAssetIDByName("ChatIcon");
 
-    const IconButton = originalButton.type;
-    const originalProps = originalButton.props;
+    const openInbox = () => {
+        const Navigation = findByProps("push", "pushLazy", "pop");
+        const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
+        const modalCloseButton =
+            findByProps("getRenderCloseButton")?.getRenderCloseButton ??
+            findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
+
+        if (!Navigator || !Navigation?.push) return;
+        Navigation.push(() => (
+            <Navigator
+                initialRouteName="YouBarInbox"
+                goBackOnBackPress
+                screens={{
+                    YouBarInbox: {
+                        title: "Inbox",
+                        headerLeft: modalCloseButton?.(() => Navigation.pop()),
+                        render: () => <NotificationCenterUI />,
+                    },
+                }}
+            />
+        ));
+    };
 
     return (
         <React.Fragment>
@@ -43,49 +63,55 @@ function YouBarCustomButtons({ originalButton }: { originalButton: any }) {
                 />
             )}
 
-            {storage.showInboxButton ? (
+            {storage.showInboxButton && (
                 <IconButton
                     variant={originalProps?.variant || "tertiary"}
                     size={originalProps?.size || "sm"}
                     icon={BellIcon || originalProps?.icon}
-                    onPress={() => {
-                        const Navigation = findByProps("push", "pushLazy", "pop");
-                        const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
-                        const modalCloseButton =
-                            findByProps("getRenderCloseButton")?.getRenderCloseButton ??
-                            findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
-
-                        if (!Navigator || !Navigation?.push) return;
-                        Navigation.push(() => (
-                            <Navigator
-                                initialRouteName="YouBarInbox"
-                                goBackOnBackPress
-                                screens={{
-                                    YouBarInbox: {
-                                        title: "Inbox",
-                                        headerLeft: modalCloseButton?.(() => Navigation.pop()),
-                                        render: () => <NotificationCenterUI />,
-                                    },
-                                }}
-                            />
-                        ));
-                    }}
+                    onPress={openInbox}
                 />
-            ) : (
-                originalButton
             )}
         </React.Fragment>
     );
 }
 
 export function patchYouBar() {
-    const YouBarNotificationsButton = findByTypeName("YouBarNotificationsButton");
-    if (!YouBarNotificationsButton) return null;
+    // Patch the parent row module that contains YouBar actions
+    const YouBarModule = findByProps("YouBarNotificationsButton") || findByProps("YouBar");
+    
+    if (YouBarModule?.YouBarNotificationsButton) {
+        return after("YouBarNotificationsButton", YouBarModule, (_, res) => {
+            if (!res?.props?.children) return res;
+            
+            const IconButton = res.props.children.type;
+            const originalProps = res.props.children.props;
 
-    return after("type", YouBarNotificationsButton, (_, res) => {
-        if (!res?.props?.children) return res;
+            return (
+                <YouBarCustomButtons 
+                    IconButton={IconButton} 
+                    originalProps={originalProps} 
+                />
+            );
+        });
+    }
 
-        // Delegate UI rendering to standard React element tree so transition mounts stay intact
-        return <YouBarCustomButtons originalButton={res.props.children} />;
-    });
+    // Fallback: If module isn't on object export, patch direct render functional component
+    const YouBarDirect = findByName("YouBarNotificationsButton", false);
+    if (YouBarDirect) {
+        return after("default", YouBarDirect, (_, res) => {
+            if (!res?.props?.children) return res;
+
+            const IconButton = res.props.children.type;
+            const originalProps = res.props.children.props;
+
+            return (
+                <YouBarCustomButtons 
+                    IconButton={IconButton} 
+                    originalProps={originalProps} 
+                />
+            );
+        });
+    }
+
+    return null;
 }
