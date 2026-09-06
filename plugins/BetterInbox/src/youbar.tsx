@@ -14,7 +14,7 @@ const modalCloseButton =
 const userSettingsAction = findByProps("openUserSettings");
 const transitionModule = findByProps("transitionToGuild");
 
-export default function patchYouBarButtons(): () => void {
+export function patchYouBar(): () => void {
   const YouBarNotificationsButton = findByTypeName("YouBarNotificationsButton");
   if (!YouBarNotificationsButton) return () => {};
 
@@ -39,7 +39,6 @@ export default function patchYouBarButtons(): () => void {
     ));
   };
 
-  // Using 'after' on the outer component render avoids React key/type injection panics
   return after("type", YouBarNotificationsButton, (_, res) => {
     if (!res?.props?.children) return res;
 
