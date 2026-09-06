@@ -7,19 +7,30 @@ import SettingsUI from "./components/SettingsUI";
 let unpatchYouBar: (() => void) | null = null;
 let watcherInterval: ReturnType<typeof setInterval> | null = null;
 
-function applyPatchWithRetry() {
-    if (unpatchYouBar) return;
-
-    const cleanup = patchYouBar();
-    if (typeof cleanup === "function") {
-        unpatchYouBar = cleanup;
-        
-        // Patch attached successfully; clear polling loop
-        if (watcherInterval) {
-            clearInterval(watcherInterval);
-            watcherInterval = null;
-        }
+function forceAppRefresh() {
+    // Triggers a subtle UI re-render on the active screen stack without logging out
+    const AppRenderStore = findByProps("emitChange", "addChangeListener");
+    if (AppRenderStore?.emitChange) {
+        AppRenderStore.emitChange();
     }
+}
+
+function attemptPatch() {
+    if (unpatchYouBar) return true;
+
+    try {
+        const cleanup = patchYouBar();
+        if (typeof cleanup === "function") {
+            unpatchYouBar = cleanup;
+            
+            // Force React to re-evaluate current view tree so YouBar updates without switching accounts
+            setTimeout(forceAppRefresh, 100);
+            return true;
+        }
+    } catch (e) {
+        console.error("[BetterInbox] Patch error:", e);
+    }
+    return false;
 }
 
 export default {
@@ -30,22 +41,20 @@ export default {
 
         initNotificationEngine();
 
-        // 1. Initial attempt
-        applyPatchWithRetry();
-
-        // 2. Poll until the module is rendered in memory
-        if (!unpatchYouBar) {
-            watcherInterval = setInterval(applyPatchWithRetry, 300);
-        }
-
-        // 3. Listen to transition/channel switch events to ensure target stays patched
-        const SelectedChannelStore = findByProps("getChannelId", "getVoiceChannelId");
-        if (SelectedChannelStore?.addChangeListener) {
-            SelectedChannelStore.addChangeListener(() => {
-                if (!unpatchYouBar) {
-                    applyPatchWithRetry();
+        // 1. Immediate attempt
+        if (!attemptPatch()) {
+            // 2. Poll rapidly during startup until Metro loads YouBar
+            let attempts = 0;
+            watcherInterval = setInterval(() => {
+                attempts++;
+                const success = attemptPatch();
+                
+                // Stop watching after successful patch or 10 seconds cutoff
+                if (success || attempts > 40) {
+                    if (watcherInterval) clearInterval(watcherInterval);
+                    watcherInterval = null;
                 }
-            });
+            }, 250);
         }
     },
 
@@ -61,6 +70,7 @@ export default {
         }
 
         stopNotificationEngine();
+        forceAppRefresh();
     },
 
     settings: SettingsUI,
