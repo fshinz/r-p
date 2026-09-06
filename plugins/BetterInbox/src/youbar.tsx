@@ -1,87 +1,114 @@
-import { findByProps } from "@vendetta/metro";
+import { findByProps, findByName } from "@vendetta/metro";
+import { React } from "@vendetta/metro/common";
+import { after } from "@vendetta/patcher";
 import { storage } from "@vendetta/plugin";
-import { patchYouBar } from "./youbar";
-import { initNotificationEngine, stopNotificationEngine } from "./notifications";
-import SettingsUI from "./components/SettingsUI";
+import { useProxy } from "@vendetta/storage";
+import { getAssetIDByName } from "@vendetta/ui/assets";
+import NotificationCenterUI from "./components/NotificationCenterUI";
 
-let unpatchYouBar: (() => void) | null = null;
-let watcherInterval: ReturnType<typeof setInterval> | null = null;
+function YouBarCustomButtons({ originalProps, IconButton }: any) {
+    useProxy(storage);
 
-// The Hard Nuke: Triggers a React Native JS bundle reload
-function hardReloadApp() {
-    const BundleUpdaterModule = findByProps("reload", "supportsNativeInterface") ?? findByProps("reload");
-    const DevMenuModule = findByProps("reload", "toggle");
+    const BellIcon = getAssetIDByName("BellIcon") || getAssetIDByName("NotificationBellIcon");
+    const SettingsIcon = getAssetIDByName("SettingsIcon");
+    const ChatIcon = getAssetIDByName("ChatIcon");
 
-    if (typeof BundleUpdaterModule?.reload === "function") {
-        BundleUpdaterModule.reload();
-    } else if (typeof DevMenuModule?.reload === "function") {
-        DevMenuModule.reload();
-    } else {
-        console.warn("[BetterInbox] Hard reload module not found in Metro.");
-    }
+    const openInbox = () => {
+        const Navigation = findByProps("push", "pushLazy", "pop");
+        const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
+        const modalCloseButton =
+            findByProps("getRenderCloseButton")?.getRenderCloseButton ??
+            findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
+
+        if (!Navigator || !Navigation?.push) return;
+        Navigation.push(() => (
+            <Navigator
+                initialRouteName="YouBarInbox"
+                goBackOnBackPress
+                screens={{
+                    YouBarInbox: {
+                        title: "Inbox",
+                        headerLeft: modalCloseButton?.(() => Navigation.pop()),
+                        render: () => <NotificationCenterUI />,
+                    },
+                }}
+            />
+        ));
+    };
+
+    return (
+        <React.Fragment>
+            {storage.showDMButton && (
+                <IconButton
+                    variant={originalProps?.variant || "tertiary"}
+                    size={originalProps?.size || "sm"}
+                    icon={ChatIcon}
+                    onPress={() => {
+                        const transitionModule = findByProps("transitionToGuild");
+                        transitionModule?.transitionToGuild?.("@me");
+                    }}
+                />
+            )}
+
+            {storage.showSettingsButton && (
+                <IconButton
+                    variant={originalProps?.variant || "tertiary"}
+                    size={originalProps?.size || "sm"}
+                    icon={SettingsIcon}
+                    onPress={() => {
+                        const userSettingsAction = findByProps("openUserSettings");
+                        userSettingsAction?.openUserSettings?.();
+                    }}
+                />
+            )}
+
+            {storage.showInboxButton && (
+                <IconButton
+                    variant={originalProps?.variant || "tertiary"}
+                    size={originalProps?.size || "sm"}
+                    icon={BellIcon || originalProps?.icon}
+                    onPress={openInbox}
+                />
+            )}
+        </React.Fragment>
+    );
 }
 
-function attemptPatch(): boolean {
-    if (unpatchYouBar) return true;
+export function patchYouBar(): (() => void) | null {
+    const YouBarModule = findByProps("YouBarNotificationsButton") || findByProps("YouBar");
+    
+    if (YouBarModule?.YouBarNotificationsButton) {
+        return after("YouBarNotificationsButton", YouBarModule, (_, res) => {
+            if (!res?.props?.children) return res;
+            
+            const IconButton = res.props.children.type;
+            const originalProps = res.props.children.props;
 
-    try {
-        const cleanup = patchYouBar();
-        if (typeof cleanup === "function") {
-            unpatchYouBar = cleanup;
-            return true;
-        }
-    } catch (e) {
-        console.error("[BetterInbox] Failed patching YouBar:", e);
+            return (
+                <YouBarCustomButtons 
+                    IconButton={IconButton} 
+                    originalProps={originalProps} 
+                />
+            );
+        });
     }
-    return false;
+
+    const YouBarDirect = findByName("YouBarNotificationsButton", false);
+    if (YouBarDirect) {
+        return after("default", YouBarDirect, (_, res) => {
+            if (!res?.props?.children) return res;
+
+            const IconButton = res.props.children.type;
+            const originalProps = res.props.children.props;
+
+            return (
+                <YouBarCustomButtons 
+                    IconButton={IconButton} 
+                    originalProps={originalProps} 
+                />
+            );
+        });
+    }
+
+    return null;
 }
-
-export default {
-    onLoad: () => {
-        storage.showDMButton ??= false;
-        storage.showSettingsButton ??= true;
-        storage.showInboxButton ??= true;
-
-        initNotificationEngine();
-
-        // 1. Initial patch attempt on load
-        const patchedImmediately = attemptPatch();
-
-        // 2. Continuous polling until Metro resolves YouBar
-        if (!patchedImmediately) {
-            let attempts = 0;
-            watcherInterval = setInterval(() => {
-                attempts++;
-                const success = attemptPatch();
-
-                if (success || attempts > 40) {
-                    if (watcherInterval) clearInterval(watcherInterval);
-                    watcherInterval = null;
-                }
-            }, 250);
-        }
-
-        // 3. Optional: Trigger the hard nuke 1.5s after boot if you need to force full fresh load
-        /*
-        setTimeout(() => {
-            hardReloadApp();
-        }, 1500);
-        */
-    },
-
-    onUnload: () => {
-        if (watcherInterval) {
-            clearInterval(watcherInterval);
-            watcherInterval = null;
-        }
-
-        if (unpatchYouBar) {
-            unpatchYouBar();
-            unpatchYouBar = null;
-        }
-
-        stopNotificationEngine();
-    },
-
-    settings: SettingsUI,
-};
