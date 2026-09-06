@@ -1,6 +1,5 @@
 import { React, stylesheet } from "@vendetta/metro/common";
 import { findByProps } from "@vendetta/metro";
-import { Forms } from "@vendetta/ui/components";
 import {
   View,
   Text,
@@ -11,13 +10,16 @@ import {
 import {
   getNotifications,
   subscribeToNotifications,
-  clearAllNotifications,
+  clearNotificationsByCategory, // Make sure your notifications module exports category clearing or filter inline
 } from "../notifications";
 import type { NotificationCategory, NotificationItem } from "../types";
 
-// Dynamic lookup for Discord semantic theme colors
+// Dynamic Theme & Color Resolution
+const ThemeStore = findByProps("theme");
 const ColorModule = findByProps("semanticColors", "rawColors") || findByProps("ThemeColorMap");
-const semanticColors = ColorModule?.semanticColors ?? ColorModule ?? {};
+
+const semanticColors = ColorModule?.semanticColors ?? {};
+const rawColors = ColorModule?.rawColors ?? {};
 
 const ChannelNavigation = findByProps("selectChannel", "jumpToMessage");
 const NavigationNative = findByProps("navigate", "push");
@@ -35,7 +37,7 @@ const CATEGORIES: { id: NotificationCategory | "all"; label: string }[] = [
 const styles = stylesheet.createThemedStyleSheet({
   container: {
     flex: 1,
-    backgroundColor: semanticColors?.BACKGROUND_PRIMARY ?? "#1e1f22",
+    backgroundColor: semanticColors.BACKGROUND_PRIMARY ?? rawColors.PRIMARY_600,
   },
   headerSection: {
     flexDirection: "row",
@@ -46,12 +48,12 @@ const styles = stylesheet.createThemedStyleSheet({
     paddingBottom: 8,
   },
   headerTitle: {
-    color: semanticColors?.HEADER_PRIMARY ?? "#ffffff",
+    color: semanticColors.HEADER_PRIMARY ?? rawColors.WHITE,
     fontSize: 20,
     fontWeight: "700",
   },
   clearText: {
-    color: semanticColors?.TEXT_DANGER ?? "#f23f43",
+    color: semanticColors.TEXT_DANGER ?? rawColors.RED_400,
     fontSize: 14,
     fontWeight: "600",
   },
@@ -64,56 +66,56 @@ const styles = stylesheet.createThemedStyleSheet({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: semanticColors?.BACKGROUND_SECONDARY_ALT ?? "#2b2d31",
+    backgroundColor: semanticColors.BACKGROUND_SECONDARY ?? rawColors.PRIMARY_630,
   },
   activePill: {
-    backgroundColor: semanticColors?.BG_BRAND ?? "#5865f2",
+    backgroundColor: semanticColors.BG_BRAND ?? rawColors.BRAND_500,
   },
   pillText: {
-    color: semanticColors?.INTERACTIVE_NORMAL ?? "#949ba4",
+    color: semanticColors.INTERACTIVE_NORMAL ?? rawColors.PRIMARY_300,
     fontSize: 13,
     fontWeight: "600",
   },
   activePillText: {
-    color: "#ffffff",
+    color: rawColors.WHITE ?? "#ffffff",
   },
   listContent: {
     paddingHorizontal: 12,
     paddingBottom: 20,
   },
-  // Card styling that matches Discord's native card containers
+  // Discord Native Card Colors
   card: {
-    backgroundColor: semanticColors?.BACKGROUND_SECONDARY ?? "#2b2d31",
+    backgroundColor: semanticColors.CARD_PRIMARY_BG ?? semanticColors.BACKGROUND_SECONDARY ?? rawColors.PRIMARY_630,
     borderRadius: 12,
     marginVertical: 4,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: semanticColors?.BACKGROUND_MODIFIER_ACCENT ?? "rgba(255, 255, 255, 0.05)",
+    borderColor: semanticColors.BACKGROUND_MODIFIER_ACCENT ?? "rgba(255, 255, 255, 0.08)",
   },
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: semanticColors?.BACKGROUND_SECONDARY_ALT ?? "#1e1f22",
+    backgroundColor: semanticColors.CARD_SECONDARY_BG ?? semanticColors.BACKGROUND_SECONDARY_ALT ?? rawColors.PRIMARY_660,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   cardTitle: {
-    color: semanticColors?.HEADER_PRIMARY ?? "#ffffff",
+    color: semanticColors.HEADER_PRIMARY ?? rawColors.WHITE,
     fontSize: 14,
     fontWeight: "600",
     flex: 1,
     marginRight: 8,
   },
   timestamp: {
-    color: semanticColors?.TEXT_MUTED ?? "#949ba4",
+    color: semanticColors.TEXT_MUTED ?? rawColors.PRIMARY_360,
     fontSize: 11,
   },
   cardBody: {
     padding: 12,
   },
   cardContent: {
-    color: semanticColors?.TEXT_NORMAL ?? "#dbdee1",
+    color: semanticColors.TEXT_NORMAL ?? rawColors.PRIMARY_230,
     fontSize: 13,
     lineHeight: 18,
     marginBottom: 6,
@@ -122,7 +124,7 @@ const styles = stylesheet.createThemedStyleSheet({
     marginTop: 2,
   },
   location: {
-    color: semanticColors?.TEXT_MUTED ?? "#949ba4",
+    color: semanticColors.TEXT_MUTED ?? rawColors.PRIMARY_360,
     fontSize: 11,
     fontWeight: "500",
   },
@@ -131,7 +133,7 @@ const styles = stylesheet.createThemedStyleSheet({
     alignItems: "center",
   },
   emptyText: {
-    color: semanticColors?.TEXT_MUTED ?? "#949ba4",
+    color: semanticColors.TEXT_MUTED ?? rawColors.PRIMARY_360,
     fontSize: 14,
   },
 });
@@ -150,6 +152,19 @@ export default function NotificationCenterUI() {
     if (activeTab === "all") return items;
     return items.filter((item) => item.category === activeTab);
   }, [items, activeTab]);
+
+  const handleClear = () => {
+    if (typeof clearNotificationsByCategory === "function") {
+      clearNotificationsByCategory(activeTab);
+    } else {
+      // Fallback: update state directly if category helper isn't in notifications file
+      if (activeTab === "all") {
+        setItems([]);
+      } else {
+        setItems((prev) => prev.filter((item) => item.category !== activeTab));
+      }
+    }
+  };
 
   const jumpToMessage = (item: NotificationItem) => {
     if (!item.channelId) return;
@@ -210,13 +225,19 @@ export default function NotificationCenterUI() {
     );
   };
 
+  const activeLabel = CATEGORIES.find((c) => c.id === activeTab)?.label ?? "";
+
   return (
     <View style={styles.container}>
       <View style={styles.headerSection}>
         <Text style={styles.headerTitle}>Notification Center</Text>
-        <TouchableOpacity onPress={clearAllNotifications}>
-          <Text style={styles.clearText}>Clear All</Text>
-        </TouchableOpacity>
+        {filteredItems.length > 0 && (
+          <TouchableOpacity onPress={handleClear}>
+            <Text style={styles.clearText}>
+              {activeTab === "all" ? "Clear All" : `Clear ${activeLabel}`}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <View>
