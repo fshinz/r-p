@@ -1,50 +1,47 @@
-import NotificationCenterUI from "./components/NotificationCenterUI";
-import { initNotificationEngine, stopNotificationEngine } from "./notifications";
-import { patchYouBar } from "./youbar";
+import { storage } from "@vendetta/plugin";
+import patchYouBarButtons from "./youbar";
+import { setInboxTracking } from "./notifications";
+import SettingsUI from "./components/SettingsUI";
 
-const unpatches: (() => void)[] = [];
-let retryHandle: ReturnType<typeof setInterval> | undefined;
-
-function stopRetrying() {
-  if (retryHandle) {
-    clearInterval(retryHandle);
-    retryHandle = undefined;
-  }
-}
-
-function attemptYouBarPatch() {
-  try {
-    const unpatch = patchYouBar();
-    if (unpatch) {
-      unpatches.push(unpatch);
-      stopRetrying();
-      console.log("[BetterInbox] Successfully patched YouBar");
-    }
-  } catch (e) {
-    console.error(`[BetterInbox] Failed to patch YouBar: ${e}`);
-    stopRetrying();
-  }
-}
+let unpatchButtons: (() => void) | null = null;
+let retryInterval: any = null;
 
 export default {
   onLoad: () => {
-    initNotificationEngine();
+    storage.showDMButton ??= false;
+    storage.showSettingsButton ??= true;
+    storage.showInboxButton ??= true;
+    storage.notifications ??= [];
 
-    attemptYouBarPatch();
+    setInboxTracking(true);
+
+    const tryPatch = () => {
+      if (unpatchButtons) return;
+      try {
+        const cleanup = patchYouBarButtons();
+        if (cleanup && typeof cleanup === "function") {
+          unpatchButtons = cleanup;
+          if (retryInterval) clearInterval(retryInterval);
+        }
+      } catch (e) {
+        console.error("[BetterInbox] Failed to patch YouBar:", e);
+      }
+    };
+
+    tryPatch();
     let ticks = 0;
-    retryHandle = setInterval(() => {
-      attemptYouBarPatch();
-      if (++ticks >= 30) stopRetrying();
-    }, 300);
+    // Retry every 250ms for up to 15 seconds to ensure lazy-loaded UI modules are hooked
+    retryInterval = setInterval(() => {
+      tryPatch();
+      if (++ticks >= 60 && retryInterval) clearInterval(retryInterval);
+    }, 250);
   },
 
   onUnload: () => {
-    stopRetrying();
-    stopNotificationEngine();
-
-    for (const unpatch of unpatches) unpatch?.();
-    unpatches.length = 0;
+    if (retryInterval) clearInterval(retryInterval);
+    if (unpatchButtons) unpatchButtons();
+    setInboxTracking(false);
   },
 
-  settings: NotificationCenterUI,
+  settings: SettingsUI,
 };
