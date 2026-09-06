@@ -1,77 +1,54 @@
-import { React, ReactNative } from "@vendetta/metro/common";
-import { Forms } from "@vendetta/ui/components";
-import { useProxy } from "@vendetta/storage";
-import { storage } from "@vendetta/plugin";
-import { resolveSemanticColor } from "@vendetta/ui/colors";
+import { React, ReactNative as RN } from "@vendetta/metro/common";
 import { findByProps } from "@vendetta/metro";
+import { storage } from "@vendetta/plugin";
+import { useProxy } from "@vendetta/storage";
 
-const { ScrollView, StyleSheet } = ReactNative;
-const { TableRow, TableRowGroup, FormSwitch } = Forms;
+const { ScrollView } = RN;
 
-// Fallback color resolution for background contrast
-const ColorModule = findByProps("semanticColors", "rawColors") || findByProps("ThemeColorMap");
-const semanticColors = ColorModule?.semanticColors ?? {};
-
-const getColor = (semanticKey: string, fallback: string) => {
-  try {
-    if (semanticColors[semanticKey]) {
-      return resolveSemanticColor(semanticColors[semanticKey]) || fallback;
-    }
-  } catch {}
-  return fallback;
-};
+// Safely grab Discord's native UI containers and controls
+const TableRowGroup = findByProps("TableRowGroup")?.TableRowGroup;
+const TableSwitchRow = findByProps("TableSwitchRow")?.TableSwitchRow;
+const Stack = findByProps("Stack")?.Stack;
 
 export default function SettingsUI(): JSX.Element {
-  useProxy(storage);
+    useProxy(storage);
 
-  return (
-    <ScrollView style={styles.container}>
-      <TableRowGroup title="YOUBAR BUTTON TOGGLES">
-        <TableRow
-          label="Direct Messages Button"
-          subLabel="Show quick jump button to DM channel list"
-          action={
-            <FormSwitch
-              value={storage.showDMButton ?? false}
-              onValueChange={(val: boolean) => {
-                storage.showDMButton = val;
-              }}
-            />
-          }
-        />
-        <TableRow
-          label="App Settings Button"
-          subLabel="Show quick button to open Discord settings"
-          action={
-            <FormSwitch
-              value={storage.showSettingsButton ?? true}
-              onValueChange={(val: boolean) => {
-                storage.showSettingsButton = val;
-              }}
-            />
-          }
-        />
-        <TableRow
-          label="BetterInbox Button"
-          subLabel="Show notification center icon in YouBar"
-          action={
-            <FormSwitch
-              value={storage.showInboxButton ?? true}
-              onValueChange={(val: boolean) => {
-                storage.showInboxButton = val;
-              }}
-            />
-          }
-        />
-      </TableRowGroup>
-    </ScrollView>
-  );
+    const showDM = storage.showDMButton ?? false;
+    const showSettings = storage.showSettingsButton ?? true;
+    const showInbox = storage.showInboxButton ?? true;
+
+    return (
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 12 }}>
+            <Stack spacing={16}>
+                {TableRowGroup && TableSwitchRow ? (
+                    <TableRowGroup title="YOUBAR BUTTON TOGGLES">
+                        <TableSwitchRow
+                            label="Direct Messages Button"
+                            subLabel="Show quick jump button to DM channel list"
+                            value={showDM}
+                            onValueChange={(val: boolean) => {
+                                storage.showDMButton = val;
+                            }}
+                        />
+                        <TableSwitchRow
+                            label="App Settings Button"
+                            subLabel="Show quick button to open Discord settings"
+                            value={showSettings}
+                            onValueChange={(val: boolean) => {
+                                storage.showSettingsButton = val;
+                            }}
+                        />
+                        <TableSwitchRow
+                            label="BetterInbox Button"
+                            subLabel="Show notification center icon in YouBar"
+                            value={showInbox}
+                            onValueChange={(val: boolean) => {
+                                storage.showInboxButton = val;
+                            }}
+                        />
+                    </TableRowGroup>
+                ) : null}
+            </Stack>
+        </ScrollView>
+    );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 12,
-    backgroundColor: getColor("BACKGROUND_PRIMARY", "#111214"),
-  },
-});
