@@ -1,5 +1,6 @@
 import { React, stylesheet } from "@vendetta/metro/common";
 import { findByProps } from "@vendetta/metro";
+import { resolveSemanticColor } from "@vendetta/ui/colors";
 import {
   View,
   Text,
@@ -10,14 +11,11 @@ import {
 import {
   getNotifications,
   subscribeToNotifications,
-  clearNotificationsByCategory, // Make sure your notifications module exports category clearing or filter inline
+  clearNotificationsByCategory,
 } from "../notifications";
 import type { NotificationCategory, NotificationItem } from "../types";
 
-// Dynamic Theme & Color Resolution
-const ThemeStore = findByProps("theme");
 const ColorModule = findByProps("semanticColors", "rawColors") || findByProps("ThemeColorMap");
-
 const semanticColors = ColorModule?.semanticColors ?? {};
 const rawColors = ColorModule?.rawColors ?? {};
 
@@ -34,10 +32,20 @@ const CATEGORIES: { id: NotificationCategory | "all"; label: string }[] = [
   { id: "other", label: "Other" },
 ];
 
+// Helper to reliably resolve colors with explicit AMOLED/dark fallbacks
+const getColor = (semanticKey: string, fallback: string) => {
+  try {
+    if (semanticColors[semanticKey]) {
+      return resolveSemanticColor(semanticColors[semanticKey]) || fallback;
+    }
+  } catch {}
+  return fallback;
+};
+
 const styles = stylesheet.createThemedStyleSheet({
   container: {
     flex: 1,
-    backgroundColor: semanticColors.BACKGROUND_PRIMARY ?? rawColors.PRIMARY_600,
+    backgroundColor: getColor("BACKGROUND_PRIMARY", "#111214"),
   },
   headerSection: {
     flexDirection: "row",
@@ -48,12 +56,12 @@ const styles = stylesheet.createThemedStyleSheet({
     paddingBottom: 8,
   },
   headerTitle: {
-    color: semanticColors.HEADER_PRIMARY ?? rawColors.WHITE,
+    color: getColor("HEADER_PRIMARY", "#F2F3F5"),
     fontSize: 20,
     fontWeight: "700",
   },
   clearText: {
-    color: semanticColors.TEXT_DANGER ?? rawColors.RED_400,
+    color: getColor("TEXT_DANGER", "#F23F43"),
     fontSize: 14,
     fontWeight: "600",
   },
@@ -66,56 +74,55 @@ const styles = stylesheet.createThemedStyleSheet({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: semanticColors.BACKGROUND_SECONDARY ?? rawColors.PRIMARY_630,
+    backgroundColor: getColor("BACKGROUND_SECONDARY_ALT", "#2B2D31"),
   },
   activePill: {
-    backgroundColor: semanticColors.BG_BRAND ?? rawColors.BRAND_500,
+    backgroundColor: getColor("BG_BRAND", "#5865F2"),
   },
   pillText: {
-    color: semanticColors.INTERACTIVE_NORMAL ?? rawColors.PRIMARY_300,
+    color: getColor("INTERACTIVE_NORMAL", "#949BA4"),
     fontSize: 13,
     fontWeight: "600",
   },
   activePillText: {
-    color: rawColors.WHITE ?? "#ffffff",
+    color: "#FFFFFF",
   },
   listContent: {
     paddingHorizontal: 12,
     paddingBottom: 20,
   },
-  // Discord Native Card Colors
   card: {
-    backgroundColor: semanticColors.CARD_PRIMARY_BG ?? semanticColors.BACKGROUND_SECONDARY ?? rawColors.PRIMARY_630,
+    backgroundColor: getColor("BACKGROUND_SECONDARY", "#1E1F22"),
     borderRadius: 12,
-    marginVertical: 4,
+    marginVertical: 5,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: semanticColors.BACKGROUND_MODIFIER_ACCENT ?? "rgba(255, 255, 255, 0.08)",
+    borderColor: getColor("BACKGROUND_MODIFIER_ACCENT", "rgba(255, 255, 255, 0.12)"),
   },
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: semanticColors.CARD_SECONDARY_BG ?? semanticColors.BACKGROUND_SECONDARY_ALT ?? rawColors.PRIMARY_660,
+    backgroundColor: getColor("BACKGROUND_SECONDARY_ALT", "#2B2D31"),
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   cardTitle: {
-    color: semanticColors.HEADER_PRIMARY ?? rawColors.WHITE,
+    color: getColor("HEADER_PRIMARY", "#FFFFFF"),
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: "700",
     flex: 1,
     marginRight: 8,
   },
   timestamp: {
-    color: semanticColors.TEXT_MUTED ?? rawColors.PRIMARY_360,
+    color: getColor("TEXT_MUTED", "#B5BAC1"),
     fontSize: 11,
   },
   cardBody: {
     padding: 12,
   },
   cardContent: {
-    color: semanticColors.TEXT_NORMAL ?? rawColors.PRIMARY_230,
+    color: getColor("TEXT_NORMAL", "#DBDEE1"),
     fontSize: 13,
     lineHeight: 18,
     marginBottom: 6,
@@ -124,16 +131,16 @@ const styles = stylesheet.createThemedStyleSheet({
     marginTop: 2,
   },
   location: {
-    color: semanticColors.TEXT_MUTED ?? rawColors.PRIMARY_360,
+    color: getColor("TEXT_MUTED", "#B5BAC1"),
     fontSize: 11,
-    fontWeight: "500",
+    fontWeight: "600",
   },
   emptyContainer: {
     padding: 40,
     alignItems: "center",
   },
   emptyText: {
-    color: semanticColors.TEXT_MUTED ?? rawColors.PRIMARY_360,
+    color: getColor("TEXT_MUTED", "#B5BAC1"),
     fontSize: 14,
   },
 });
@@ -154,16 +161,7 @@ export default function NotificationCenterUI() {
   }, [items, activeTab]);
 
   const handleClear = () => {
-    if (typeof clearNotificationsByCategory === "function") {
-      clearNotificationsByCategory(activeTab);
-    } else {
-      // Fallback: update state directly if category helper isn't in notifications file
-      if (activeTab === "all") {
-        setItems([]);
-      } else {
-        setItems((prev) => prev.filter((item) => item.category !== activeTab));
-      }
-    }
+    clearNotificationsByCategory(activeTab);
   };
 
   const jumpToMessage = (item: NotificationItem) => {
