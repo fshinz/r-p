@@ -1,7 +1,7 @@
 import { FluxDispatcher } from "@vendetta/metro/common";
 import { findByStoreName } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
-import type { LocalStorage, MentionSubCategory, NotificationItem } from "./types";
+import type { LocalStorage, MentionSubCategory, NotificationCategory, NotificationItem } from "./types";
 
 const UserStore: any = findByStoreName("UserStore");
 const ChannelStore: any = findByStoreName("ChannelStore");
@@ -45,6 +45,17 @@ export function getNotifications(): NotificationItem[] {
 export function clearAllNotifications() {
   memoryNotifications = [];
   pluginStorage.notifications = [];
+  notifyListeners();
+}
+
+export function clearNotificationsByCategory(category: NotificationCategory | "all") {
+  if (category === "all") {
+    clearAllNotifications();
+    return;
+  }
+
+  memoryNotifications = memoryNotifications.filter((item) => item.category !== category);
+  pluginStorage.notifications = memoryNotifications.slice(0, 100);
   notifyListeners();
 }
 
