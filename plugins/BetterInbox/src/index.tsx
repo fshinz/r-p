@@ -1,3 +1,4 @@
+import { findByProps } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
 import { patchYouBar } from "./youbar";
 import { initNotificationEngine, stopNotificationEngine } from "./notifications";
@@ -6,20 +7,19 @@ import SettingsUI from "./components/SettingsUI";
 let unpatchYouBar: (() => void) | null = null;
 let watcherInterval: ReturnType<typeof setInterval> | null = null;
 
-function startYouBarWatcher() {
-    watcherInterval = setInterval(() => {
-        // If not already patched, attempt to locate and patch YouBarNotificationsButton
-        if (!unpatchYouBar) {
-            try {
-                const cleanup = patchYouBar();
-                if (typeof cleanup === "function") {
-                    unpatchYouBar = cleanup;
-                }
-            } catch (e) {
-                console.error("[BetterInbox] Failed patching YouBar:", e);
-            }
+function applyPatchWithRetry() {
+    if (unpatchYouBar) return;
+
+    const cleanup = patchYouBar();
+    if (typeof cleanup === "function") {
+        unpatchYouBar = cleanup;
+        
+        // Patch attached successfully; clear polling loop
+        if (watcherInterval) {
+            clearInterval(watcherInterval);
+            watcherInterval = null;
         }
-    }, 250);
+    }
 }
 
 export default {
@@ -29,7 +29,24 @@ export default {
         storage.showInboxButton ??= true;
 
         initNotificationEngine();
-        startYouBarWatcher();
+
+        // 1. Initial attempt
+        applyPatchWithRetry();
+
+        // 2. Poll until the module is rendered in memory
+        if (!unpatchYouBar) {
+            watcherInterval = setInterval(applyPatchWithRetry, 300);
+        }
+
+        // 3. Listen to transition/channel switch events to ensure target stays patched
+        const SelectedChannelStore = findByProps("getChannelId", "getVoiceChannelId");
+        if (SelectedChannelStore?.addChangeListener) {
+            SelectedChannelStore.addChangeListener(() => {
+                if (!unpatchYouBar) {
+                    applyPatchWithRetry();
+                }
+            });
+        }
     },
 
     onUnload: () => {
