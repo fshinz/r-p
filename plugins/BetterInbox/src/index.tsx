@@ -1,6 +1,6 @@
 import { storage } from "@vendetta/plugin";
-import patchYouBarButtons from "./youbar";
-import { setInboxTracking } from "./notifications";
+import { patchYouBar } from "./youbar";
+import { initNotificationEngine, stopNotificationEngine } from "./notifications";
 import SettingsUI from "./components/SettingsUI";
 
 let unpatchButtons: (() => void) | null = null;
@@ -13,13 +13,13 @@ export default {
     storage.showInboxButton ??= true;
     storage.notifications ??= [];
 
-    setInboxTracking(true);
+    initNotificationEngine();
 
     const tryPatch = () => {
       if (unpatchButtons) return;
       try {
-        const cleanup = patchYouBarButtons();
-        if (cleanup && typeof cleanup === "function") {
+        const cleanup = patchYouBar();
+        if (typeof cleanup === "function") {
           unpatchButtons = cleanup;
           if (retryInterval) clearInterval(retryInterval);
         }
@@ -30,7 +30,6 @@ export default {
 
     tryPatch();
     let ticks = 0;
-    // Retry every 250ms for up to 15 seconds to ensure lazy-loaded UI modules are hooked
     retryInterval = setInterval(() => {
       tryPatch();
       if (++ticks >= 60 && retryInterval) clearInterval(retryInterval);
@@ -40,7 +39,7 @@ export default {
   onUnload: () => {
     if (retryInterval) clearInterval(retryInterval);
     if (unpatchButtons) unpatchButtons();
-    setInboxTracking(false);
+    stopNotificationEngine();
   },
 
   settings: SettingsUI,
