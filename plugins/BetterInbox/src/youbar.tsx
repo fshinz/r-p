@@ -3,85 +3,92 @@ import { findByProps, findByName } from "@vendetta/metro";
 import { React } from "@vendetta/metro/common";
 import { after } from "@vendetta/patcher";
 import { storage } from "@vendetta/plugin";
-import { useProxy } from "@vendetta/storage";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 
-function YouBarCustomButtons({ YouBarButtonIcon }: any) {
-    useProxy(storage);
+let isYouBarReady = false;
 
-    const BellIcon = getAssetIDByName("BellIcon") || getAssetIDByName("NotificationBellIcon");
-    const SettingsIcon = getAssetIDByName("SettingsIcon");
-    const ChatIcon = getAssetIDByName("ChatIcon");
-
-    const openInbox = () => {
-        const Navigation = findByProps("push", "pushLazy", "pop");
-        const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
-        const modalCloseButton =
-            findByProps("getRenderCloseButton")?.getRenderCloseButton ??
-            findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
-
-        if (!Navigator || !Navigation?.push) return;
-        Navigation.push(() => (
-            <Navigator
-                initialRouteName="YouBarInbox"
-                goBackOnBackPress
-                screens={{
-                    YouBarInbox: {
-                        title: "Inbox",
-                        headerLeft: modalCloseButton?.(() => Navigation.pop()),
-                        render: () => <NotificationCenterUI />,
-                    },
-                }}
-            />
-        ));
-    };
-
-    return (
-        <React.Fragment>
-            {storage.showDMButton && (
-                <YouBarButtonIcon
-                    icon={ChatIcon}
-                    onPress={() => {
-                        const transitionModule = findByProps("transitionToGuild");
-                        transitionModule?.transitionToGuild?.("@me");
-                    }}
-                />
-            )}
-
-            {storage.showSettingsButton && (
-                <YouBarButtonIcon
-                    icon={SettingsIcon}
-                    onPress={() => {
-                        const userSettingsAction = findByProps("openUserSettings");
-                        userSettingsAction?.openUserSettings?.();
-                    }}
-                />
-            )}
-
-            {storage.showInboxButton && (
-                <YouBarButtonIcon
-                    icon={BellIcon}
-                    onPress={openInbox}
-                />
-            )}
-        </React.Fragment>
-    );
+export function setYouBarReady(ready: boolean) {
+    isYouBarReady = ready;
 }
 
 export function patchYouBar(): (() => void) | null {
     const YouBarModule = findByProps("YouBarButtonContainer", "YouBarButtonIcon");
     if (!YouBarModule?.YouBarButtonContainer || !YouBarModule?.YouBarButtonIcon) return null;
 
+    const YouBarButtonIcon = YouBarModule.YouBarButtonIcon;
+
     return after("YouBarButtonContainer", YouBarModule, (_, res) => {
-        if (!res) return res;
+        // Safe Fallback: Don't modify initial cold-boot render pass at all
+        if (!res || !isYouBarReady) return res;
 
-        logger.log("[BetterInbox] Rendering YouBarButtonIcon elements into container");
+        logger.log("[BetterInbox] YouBar ready - injecting custom buttons on animation frame");
 
-        return React.cloneElement(
-            res,
-            { ...res.props },
-            <YouBarCustomButtons YouBarButtonIcon={YouBarModule.YouBarButtonIcon} />
-        );
+        const BellIcon = getAssetIDByName("BellIcon") || getAssetIDByName("NotificationBellIcon");
+        const SettingsIcon = getAssetIDByName("SettingsIcon");
+        const ChatIcon = getAssetIDByName("ChatIcon");
+
+        const openInbox = () => {
+            const Navigation = findByProps("push", "pushLazy", "pop");
+            const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
+            const modalCloseButton =
+                findByProps("getRenderCloseButton")?.getRenderCloseButton ??
+                findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
+
+            if (!Navigator || !Navigation?.push) return;
+            Navigation.push(() => (
+                <Navigator
+                    initialRouteName="YouBarInbox"
+                    goBackOnBackPress
+                    screens={{
+                        YouBarInbox: {
+                            title: "Inbox",
+                            headerLeft: modalCloseButton?.(() => Navigation.pop()),
+                            render: () => <NotificationCenterUI />,
+                        },
+                    }}
+                />
+            ));
+        };
+
+        const buttons: any[] = [];
+
+        if (storage.showDMButton) {
+            buttons.push(
+                <YouBarButtonIcon
+                    key="betterinbox-dm"
+                    icon={ChatIcon}
+                    onPress={() => {
+                        const transitionModule = findByProps("transitionToGuild");
+                        transitionModule?.transitionToGuild?.("@me");
+                    }}
+                />
+            );
+        }
+
+        if (storage.showSettingsButton) {
+            buttons.push(
+                <YouBarButtonIcon
+                    key="betterinbox-settings"
+                    icon={SettingsIcon}
+                    onPress={() => {
+                        const userSettingsAction = findByProps("openUserSettings");
+                        userSettingsAction?.openUserSettings?.();
+                    }}
+                />
+            );
+        }
+
+        if (storage.showInboxButton) {
+            buttons.push(
+                <YouBarButtonIcon
+                    key="betterinbox-inbox"
+                    icon={BellIcon}
+                    onPress={openInbox}
+                />
+            );
+        }
+
+        return React.cloneElement(res, { ...res.props }, buttons);
     });
 }
