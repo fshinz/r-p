@@ -7,15 +7,17 @@ import SettingsUI from "./components/SettingsUI";
 let unpatchYouBar: (() => void) | null = null;
 let watcherInterval: ReturnType<typeof setInterval> | null = null;
 
-// Solves the post-render race condition by triggering Flux state recalculation
-function triggerNavReRender() {
-    const UserStore = findByProps("getCurrentUser", "emitChange");
-    const UnreadStore = findByProps("getUnreadCount", "emitChange");
+// Forces Module 16392 to re-evaluate via Module 14437 or Flux state tick
+function forceYouBarRefresh() {
+    const AccessibilityStore = findByProps("setYouBarAnimations");
+    if (typeof AccessibilityStore?.setYouBarAnimations === "function") {
+        AccessibilityStore.setYouBarAnimations(true);
+        return;
+    }
 
+    const UserStore = findByProps("getCurrentUser", "emitChange");
     if (UserStore?.emitChange) {
         UserStore.emitChange();
-    } else if (UnreadStore?.emitChange) {
-        UnreadStore.emitChange();
     }
 }
 
@@ -27,12 +29,12 @@ function attemptPatch(): boolean {
         if (typeof cleanup === "function") {
             unpatchYouBar = cleanup;
             
-            // Component was patched after initial mount; force immediate VDOM reconciliation
-            setTimeout(triggerNavReRender, 50);
+            // Force immediate VDOM update once patch binds
+            setTimeout(forceYouBarRefresh, 50);
             return true;
         }
     } catch (e) {
-        console.error("[BetterInbox] Patch error:", e);
+        console.error("[BetterInbox] Failed to patch YouBarButtonContainer:", e);
     }
     return false;
 }
@@ -45,9 +47,9 @@ export default {
 
         initNotificationEngine();
 
-        // 1. Immediate attempt on cold boot
+        // 1. Immediate patch attempt
         if (!attemptPatch()) {
-            // 2. Poll until Metro exposes YouBar, then force the initial render update
+            // 2. Poll until Metro loads Module 16392
             let attempts = 0;
             watcherInterval = setInterval(() => {
                 attempts++;
@@ -73,7 +75,7 @@ export default {
         }
 
         stopNotificationEngine();
-        triggerNavReRender();
+        forceYouBarRefresh();
     },
 
     settings: SettingsUI,
