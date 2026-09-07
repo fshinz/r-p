@@ -6,7 +6,7 @@ import { storage } from "@vendetta/plugin";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 
-export default function patchYouBarButtons(): () => void {
+export function patchYouBar(): () => void {
     const YouBarNotificationsButton = findByTypeName("YouBarNotificationsButton");
     if (!YouBarNotificationsButton) {
         logger.error("[BetterInbox] YouBarNotificationsButton component not found!");
@@ -49,7 +49,7 @@ export default function patchYouBarButtons(): () => void {
         const res = OriginalRender(...args);
         if (!res?.props?.children) return res;
 
-        // Grab the internal IconButton component and its native props
+        // Extract internal IconButton component and native layout props
         const IconButton = res.props.children.type;
         const originalProps = res.props.children.props;
 
@@ -92,3 +92,4 @@ export default function patchYouBarButtons(): () => void {
         );
     });
 }
+
