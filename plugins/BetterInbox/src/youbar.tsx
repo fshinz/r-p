@@ -1,3 +1,4 @@
+import { logger } from "@vendetta";
 import { findByProps, findByName } from "@vendetta/metro";
 import { React } from "@vendetta/metro/common";
 import { after } from "@vendetta/patcher";
@@ -75,20 +76,24 @@ function YouBarCustomButtons({ originalProps, IconButton }: any) {
 }
 
 export function patchYouBar(): (() => void) | null {
-    // Target Module 16392 directly via property lookup
     const YouBarModule = findByProps("YouBarButtonContainer", "YouBarButtonIcon");
     if (!YouBarModule?.YouBarButtonContainer) return null;
 
-    return after("YouBarButtonContainer", YouBarModule, (_, res) => {
-        if (!res?.props?.children) return res;
+    return after("YouBarButtonContainer", YouBarModule, (args, res) => {
+        if (!res) return res;
 
-        const IconButton = res.props.children.type || YouBarModule.YouBarButtonIcon;
-        const originalProps = res.props.children.props;
+        logger.log("[BetterInbox] YouBarButtonContainer rendered, injecting custom buttons");
 
-        return (
+        const IconButton = YouBarModule.YouBarButtonIcon;
+        const passedProps = args[0] || {};
+
+        // React Native cloneElement ensures existing style/layout props stay intact while swapping children
+        return React.cloneElement(
+            res,
+            { ...res.props },
             <YouBarCustomButtons
                 IconButton={IconButton}
-                originalProps={originalProps}
+                originalProps={passedProps}
             />
         );
     });
