@@ -6,7 +6,6 @@ import { refreshYouBarUI } from "../index";
 
 const { ScrollView } = RN;
 
-// Safely grab Discord's native UI containers and controls
 const TableRowGroup = findByProps("TableRowGroup")?.TableRowGroup;
 const TableSwitchRow = findByProps("TableSwitchRow")?.TableSwitchRow;
 const Stack = findByProps("Stack")?.Stack;
