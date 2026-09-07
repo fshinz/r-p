@@ -6,24 +6,34 @@ import { storage } from "@vendetta/plugin";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 
-let isYouBarReady = false;
-
-export function setYouBarReady(ready: boolean) {
-    isYouBarReady = ready;
-}
-
 export function patchYouBar(): (() => void) | null {
     const YouBarModule = findByProps("YouBarButtonContainer", "YouBarButtonIcon");
-    if (!YouBarModule?.YouBarButtonContainer || !YouBarModule?.YouBarButtonIcon) return null;
+    if (!YouBarModule?.YouBarButtonContainer || !YouBarModule?.YouBarButtonIcon) {
+        logger.error("[BetterInbox] YouBarModule or YouBarButtonIcon missing.");
+        return null;
+    }
 
-    const YouBarButtonIcon = YouBarModule.YouBarButtonIcon;
+    const { YouBarButtonIcon } = YouBarModule;
+
+    logger.log("[BetterInbox] Attaching YouBarButtonContainer patch...");
 
     return after("YouBarButtonContainer", YouBarModule, (_, res) => {
-        // Safe Fallback: Don't modify initial cold-boot render pass at all
-        if (!res || !isYouBarReady) return res;
+        if (!res?.props?.children) return res;
 
-        logger.log("[BetterInbox] YouBar ready - injecting custom buttons on animation frame");
+        const originalChildren = Array.isArray(res.props.children)
+            ? [...res.props.children]
+            : [res.props.children];
 
+        // Guard against duplicate injection passes on re-renders/swipes
+        const isPatched = originalChildren.some((child: any) =>
+            child?.key?.startsWith?.("betterinbox-")
+        );
+        if (isPatched) return res;
+
+        // Preserve profile/status icon (child 0) and filter out native notification button
+        const profileIcon = originalChildren[0];
+
+        // Resolve icon asset IDs
         const BellIcon = getAssetIDByName("BellIcon") || getAssetIDByName("NotificationBellIcon");
         const SettingsIcon = getAssetIDByName("SettingsIcon");
         const ChatIcon = getAssetIDByName("ChatIcon");
@@ -36,6 +46,7 @@ export function patchYouBar(): (() => void) | null {
                 findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
 
             if (!Navigator || !Navigation?.push) return;
+
             Navigation.push(() => (
                 <Navigator
                     initialRouteName="YouBarInbox"
@@ -51,10 +62,10 @@ export function patchYouBar(): (() => void) | null {
             ));
         };
 
-        const buttons: any[] = [];
+        const customButtons: any[] = [];
 
         if (storage.showDMButton) {
-            buttons.push(
+            customButtons.push(
                 <YouBarButtonIcon
                     key="betterinbox-dm"
                     icon={ChatIcon}
@@ -67,7 +78,7 @@ export function patchYouBar(): (() => void) | null {
         }
 
         if (storage.showSettingsButton) {
-            buttons.push(
+            customButtons.push(
                 <YouBarButtonIcon
                     key="betterinbox-settings"
                     icon={SettingsIcon}
@@ -80,7 +91,7 @@ export function patchYouBar(): (() => void) | null {
         }
 
         if (storage.showInboxButton) {
-            buttons.push(
+            customButtons.push(
                 <YouBarButtonIcon
                     key="betterinbox-inbox"
                     icon={BellIcon}
@@ -89,6 +100,14 @@ export function patchYouBar(): (() => void) | null {
             );
         }
 
-        return React.cloneElement(res, { ...res.props }, buttons);
+        // Keep profile/status icon intact, replace native notification icon with toggled custom buttons
+        const finalChildren = profileIcon
+            ? [profileIcon, ...customButtons]
+            : customButtons;
+
+        return React.cloneElement(res, {
+            ...res.props,
+            children: finalChildren,
+        });
     });
 }
