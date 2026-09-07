@@ -7,16 +7,20 @@ import SettingsUI from "./components/SettingsUI";
 
 let unpatchYouBar: (() => void) | null = null;
 
+/**
+ * Triggers a Flux store re-render on components listening to UserStore (such as YouBar)
+ * by emitting a CURRENT_USER_UPDATE payload without causing global navigation shifts.
+ */
 export function refreshYouBarUI() {
     const Dispatcher = findByProps("dispatch", "subscribe");
-    const SelectedChannelStore = findByProps("getChannelId", "getVoiceChannelId");
+    const UserStore = findByProps("getCurrentUser");
 
-    if (Dispatcher?.dispatch && SelectedChannelStore) {
-        const currentChannelId = SelectedChannelStore.getChannelId();
+    const currentUser = UserStore?.getCurrentUser();
+
+    if (Dispatcher?.dispatch && currentUser) {
         Dispatcher.dispatch({
-            type: "CHANNEL_SELECT",
-            channelId: currentChannelId,
-            messageId: null,
+            type: "CURRENT_USER_UPDATE",
+            user: currentUser,
         });
     }
 }
@@ -31,8 +35,10 @@ export default {
 
         initNotificationEngine();
 
+        // Patch YouBar icon components
         unpatchYouBar = patchYouBar();
 
+        // Trigger initial Flux store pass to load patched elements
         refreshYouBarUI();
     },
 
