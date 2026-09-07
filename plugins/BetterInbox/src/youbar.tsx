@@ -1,4 +1,4 @@
-import { findByTypeName, findByProps } from "@vendetta/metro";
+import { findByProps, findByName } from "@vendetta/metro";
 import { React } from "@vendetta/metro/common";
 import { after } from "@vendetta/patcher";
 import { storage } from "@vendetta/plugin";
@@ -15,7 +15,7 @@ function YouBarCustomButtons({ originalProps, IconButton }: any) {
 
     const openInbox = () => {
         const Navigation = findByProps("push", "pushLazy", "pop");
-        const Navigator = findByProps("Navigator")?.Navigator;
+        const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
         const modalCloseButton =
             findByProps("getRenderCloseButton")?.getRenderCloseButton ??
             findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
@@ -75,13 +75,14 @@ function YouBarCustomButtons({ originalProps, IconButton }: any) {
 }
 
 export function patchYouBar(): (() => void) | null {
-    const YouBarNotificationsButton = findByTypeName("YouBarNotificationsButton");
-    if (!YouBarNotificationsButton) return null;
+    // Target Module 16392 directly via property lookup
+    const YouBarModule = findByProps("YouBarButtonContainer", "YouBarButtonIcon");
+    if (!YouBarModule?.YouBarButtonContainer) return null;
 
-    return after("type", YouBarNotificationsButton, (_, res) => {
+    return after("YouBarButtonContainer", YouBarModule, (_, res) => {
         if (!res?.props?.children) return res;
 
-        const IconButton = res.props.children.type;
+        const IconButton = res.props.children.type || YouBarModule.YouBarButtonIcon;
         const originalProps = res.props.children.props;
 
         return (
