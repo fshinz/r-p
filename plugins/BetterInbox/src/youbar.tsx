@@ -7,7 +7,7 @@ import { useProxy } from "@vendetta/storage";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 
-function YouBarCustomButtons({ originalProps, IconButton }: any) {
+function YouBarCustomButtons({ YouBarButtonIcon }: any) {
     useProxy(storage);
 
     const BellIcon = getAssetIDByName("BellIcon") || getAssetIDByName("NotificationBellIcon");
@@ -40,9 +40,7 @@ function YouBarCustomButtons({ originalProps, IconButton }: any) {
     return (
         <React.Fragment>
             {storage.showDMButton && (
-                <IconButton
-                    variant={originalProps?.variant || "tertiary"}
-                    size={originalProps?.size || "sm"}
+                <YouBarButtonIcon
                     icon={ChatIcon}
                     onPress={() => {
                         const transitionModule = findByProps("transitionToGuild");
@@ -52,9 +50,7 @@ function YouBarCustomButtons({ originalProps, IconButton }: any) {
             )}
 
             {storage.showSettingsButton && (
-                <IconButton
-                    variant={originalProps?.variant || "tertiary"}
-                    size={originalProps?.size || "sm"}
+                <YouBarButtonIcon
                     icon={SettingsIcon}
                     onPress={() => {
                         const userSettingsAction = findByProps("openUserSettings");
@@ -64,10 +60,8 @@ function YouBarCustomButtons({ originalProps, IconButton }: any) {
             )}
 
             {storage.showInboxButton && (
-                <IconButton
-                    variant={originalProps?.variant || "tertiary"}
-                    size={originalProps?.size || "sm"}
-                    icon={BellIcon || originalProps?.icon}
+                <YouBarButtonIcon
+                    icon={BellIcon}
                     onPress={openInbox}
                 />
             )}
@@ -77,24 +71,17 @@ function YouBarCustomButtons({ originalProps, IconButton }: any) {
 
 export function patchYouBar(): (() => void) | null {
     const YouBarModule = findByProps("YouBarButtonContainer", "YouBarButtonIcon");
-    if (!YouBarModule?.YouBarButtonContainer) return null;
+    if (!YouBarModule?.YouBarButtonContainer || !YouBarModule?.YouBarButtonIcon) return null;
 
-    return after("YouBarButtonContainer", YouBarModule, (args, res) => {
+    return after("YouBarButtonContainer", YouBarModule, (_, res) => {
         if (!res) return res;
 
-        logger.log("[BetterInbox] YouBarButtonContainer rendered, injecting custom buttons");
+        logger.log("[BetterInbox] Rendering YouBarButtonIcon elements into container");
 
-        const IconButton = YouBarModule.YouBarButtonIcon;
-        const passedProps = args[0] || {};
-
-        // React Native cloneElement ensures existing style/layout props stay intact while swapping children
         return React.cloneElement(
             res,
             { ...res.props },
-            <YouBarCustomButtons
-                IconButton={IconButton}
-                originalProps={passedProps}
-            />
+            <YouBarCustomButtons YouBarButtonIcon={YouBarModule.YouBarButtonIcon} />
         );
     });
 }
