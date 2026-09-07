@@ -1,76 +1,111 @@
 import { logger } from "@vendetta";
-import { findByProps } from "@vendetta/metro";
+import { findByProps, findByName } from "@vendetta/metro";
+import { React } from "@vendetta/metro/common";
+import { after } from "@vendetta/patcher";
 import { storage } from "@vendetta/plugin";
-import { patchYouBar, setYouBarReady } from "./youbar";
-import { initNotificationEngine, stopNotificationEngine } from "./notifications";
-import SettingsUI from "./components/SettingsUI";
+import { getAssetIDByName } from "@vendetta/ui/assets";
+import NotificationCenterUI from "./components/NotificationCenterUI";
 
-let unpatchYouBar: (() => void) | null = null;
-let watcherInterval: ReturnType<typeof setInterval> | null = null;
-let readyTimeout: ReturnType<typeof setTimeout> | null = null;
+export function patchYouBar(): (() => void) | null {
+    const YouBarModule = findByProps("YouBarButtonContainer", "YouBarButtonIcon");
+    if (!YouBarModule?.YouBarButtonContainer || !YouBarModule?.YouBarButtonIcon) return null;
 
-function triggerYouBarAnimation() {
-    const AccessibilityStore = findByProps("setYouBarAnimations");
-    if (typeof AccessibilityStore?.setYouBarAnimations === "function") {
-        logger.log("[BetterInbox] Triggering setYouBarAnimations after boot deferral");
-        AccessibilityStore.setYouBarAnimations(true);
-    }
-}
+    const YouBarButtonIcon = YouBarModule.YouBarButtonIcon;
 
-function setupDeferredPatch() {
-    unpatchYouBar = patchYouBar();
+    return after("YouBarButtonContainer", YouBarModule, (_, res) => {
+        if (!res) return res;
 
-    if (unpatchYouBar) {
-        logger.log("[BetterInbox] Patch attached in passive mode (waiting for post-boot trigger)...");
+        const BellIcon = getAssetIDByName("BellIcon") || getAssetIDByName("NotificationBellIcon");
+        const SettingsIcon = getAssetIDByName("SettingsIcon");
+        const ChatIcon = getAssetIDByName("ChatIcon");
 
-        // Wait for app to finish initial layout renders (e.g. 1-2 seconds after boot)
-        readyTimeout = setTimeout(() => {
-            logger.log("[BetterInbox] Activating patch & triggering YouBar animation");
-            setYouBarReady(true);
-            triggerYouBarAnimation();
-        }, 1500);
-    }
-}
+        const openInbox = () => {
+            const Navigation = findByProps("push", "pushLazy", "pop");
+            const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
+            const modalCloseButton =
+                findByProps("getRenderCloseButton")?.getRenderCloseButton ??
+                findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
 
-export default {
-    onLoad: () => {
-        logger.log("[BetterInbox] Plugin loading...");
+            if (!Navigator || !Navigation?.push) return;
+            Navigation.push(() => (
+                <Navigator
+                    initialRouteName="YouBarInbox"
+                    goBackOnBackPress
+                    screens={{
+                        YouBarInbox: {
+                            title: "Inbox",
+                            headerLeft: modalCloseButton?.(() => Navigation.pop()),
+                            render: () => <NotificationCenterUI />,
+                        },
+                    }}
+                />
+            ));
+        };
 
-        storage.showDMButton ??= false;
-        storage.showSettingsButton ??= true;
-        storage.showInboxButton ??= true;
+        const originalChildren = Array.isArray(res.props.children)
+            ? [...res.props.children]
+            : res.props.children
+            ? [res.props.children]
+            : [];
 
-        initNotificationEngine();
-        setYouBarReady(false);
+        // 1. Check if we've already applied our custom patch to this array
+        const alreadyPatched = originalChildren.some((c: any) => c?.key?.startsWith?.("betterinbox-"));
+        if (alreadyPatched) return res;
 
-        // Poll for Metro module readiness, then attach in passive mode
-        watcherInterval = setInterval(() => {
-            const YouBarModule = findByProps("YouBarButtonContainer");
-            if (YouBarModule?.YouBarButtonContainer) {
-                if (watcherInterval) clearInterval(watcherInterval);
-                watcherInterval = null;
+        // 2. Filter out Discord's native notification button (typically child 1)
+        // Keep only child 0 (Profile/Status button) to make space for our toggled buttons
+        const filteredChildren = originalChildren.filter((child: any, index: number) => {
+            // Keep the first button (Profile/Status), drop the native notification button
+            if (index === 0) return true;
+            
+            // Explicit guard: if child has an icon matching the native bell or notifications, remove it
+            const isNativeBell = child?.key?.includes("notification") || child?.props?.icon === BellIcon;
+            return !isNativeBell;
+        });
 
-                setupDeferredPatch();
-            }
-        }, 200);
-    },
+        // 3. Build custom buttons based on active storage settings
+        const customButtons: any[] = [];
 
-    onUnload: () => {
-        logger.log("[BetterInbox] Unloading plugin...");
-
-        setYouBarReady(false);
-
-        if (watcherInterval) clearInterval(watcherInterval);
-        if (readyTimeout) clearTimeout(readyTimeout);
-
-        if (unpatchYouBar) {
-            unpatchYouBar();
-            unpatchYouBar = null;
+        if (storage.showDMButton) {
+            customButtons.push(
+                <YouBarButtonIcon
+                    key="betterinbox-dm"
+                    icon={ChatIcon}
+                    onPress={() => {
+                        const transitionModule = findByProps("transitionToGuild");
+                        transitionModule?.transitionToGuild?.("@me");
+                    }}
+                />
+            );
         }
 
-        stopNotificationEngine();
-        triggerYouBarAnimation();
-    },
+        if (storage.showSettingsButton) {
+            customButtons.push(
+                <YouBarButtonIcon
+                    key="betterinbox-settings"
+                    icon={SettingsIcon}
+                    onPress={() => {
+                        const userSettingsAction = findByProps("openUserSettings");
+                        userSettingsAction?.openUserSettings?.();
+                    }}
+                />
+            );
+        }
 
-    settings: SettingsUI,
-};
+        if (storage.showInboxButton) {
+            customButtons.push(
+                <YouBarButtonIcon
+                    key="betterinbox-inbox"
+                    icon={BellIcon}
+                    onPress={openInbox}
+                />
+            );
+        }
+
+        // 4. Merge preserved base children with our custom toggled buttons
+        return React.cloneElement(res, {
+            ...res.props,
+            children: [...filteredChildren, ...customButtons]
+        });
+    });
+}
