@@ -1,7 +1,7 @@
 import { logger } from "@vendetta";
 import { findByProps } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
-import patchYouBarButtons from "./youbar";
+import { patchYouBar } from "./youbar";
 import { initNotificationEngine, stopNotificationEngine } from "./notifications";
 import SettingsUI from "./components/SettingsUI";
 
@@ -31,10 +31,10 @@ export default {
 
         initNotificationEngine();
 
-        // Attach patch directly to YouBarNotificationsButton
-        unpatchYouBar = patchYouBarButtons();
+        // Bind patch to YouBarNotificationsButton.type
+        unpatchYouBar = patchYouBar();
 
-        // Refresh navigation bar to apply the patched icons immediately
+        // Refresh navigation bar layout pass
         refreshYouBarUI();
     },
 
