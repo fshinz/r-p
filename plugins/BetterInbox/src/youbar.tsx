@@ -6,48 +6,45 @@ import { storage } from "@vendetta/plugin";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 
-export function patchYouBar(): () => void {
-    const YouBarNotificationsButton = findByTypeName("YouBarNotificationsButton");
-    if (!YouBarNotificationsButton) {
-        logger.error("[BetterInbox] YouBarNotificationsButton component not found!");
-        return () => {};
-    }
+let unpatchButton: (() => void) | null = null;
 
-    const Navigation = findByProps("push", "pushLazy", "pop");
-    const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
-    const modalCloseButton =
-        findByProps("getRenderCloseButton")?.getRenderCloseButton ??
-        findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
+function applyTypePatch(YouBarNotificationsButton: any) {
+    if (unpatchButton || !YouBarNotificationsButton?.type) return;
 
-    const userSettingsAction = findByProps("openUserSettings");
-    const transitionModule = findByProps("transitionToGuild");
+    logger.log("[BetterInbox] Hooked YouBarNotificationsButton.type");
 
-    const BellIcon = getAssetIDByName("BellIcon") || getAssetIDByName("NotificationBellIcon");
-    const SettingsIcon = getAssetIDByName("SettingsIcon");
-    const ChatIcon = getAssetIDByName("ChatIcon");
-
-    const openInbox = () => {
-        if (!Navigator || !Navigation?.push) return;
-        Navigation.push(() => (
-            <Navigator
-                initialRouteName="YouBarInbox"
-                goBackOnBackPress
-                screens={{
-                    YouBarInbox: {
-                        title: "Inbox",
-                        headerLeft: modalCloseButton?.(() => Navigation.pop()),
-                        render: () => <NotificationCenterUI />,
-                    },
-                }}
-            />
-        ));
-    };
-
-    logger.log("[BetterInbox] Patching YouBarNotificationsButton.type using after...");
-
-    // `after` receives (args, res) where `res` is the React Element returned by Original render
-    return after("type", YouBarNotificationsButton, (args, res) => {
+    unpatchButton = after("type", YouBarNotificationsButton, (_, res) => {
         if (!res?.props?.children) return res;
+
+        const Navigation = findByProps("push", "pushLazy", "pop");
+        const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
+        const modalCloseButton =
+            findByProps("getRenderCloseButton")?.getRenderCloseButton ??
+            findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
+
+        const userSettingsAction = findByProps("openUserSettings");
+        const transitionModule = findByProps("transitionToGuild");
+
+        const BellIcon = getAssetIDByName("BellIcon") || getAssetIDByName("NotificationBellIcon");
+        const SettingsIcon = getAssetIDByName("SettingsIcon");
+        const ChatIcon = getAssetIDByName("ChatIcon");
+
+        const openInbox = () => {
+            if (!Navigator || !Navigation?.push) return;
+            Navigation.push(() => (
+                <Navigator
+                    initialRouteName="YouBarInbox"
+                    goBackOnBackPress
+                    screens={{
+                        YouBarInbox: {
+                            title: "Inbox",
+                            headerLeft: modalCloseButton?.(() => Navigation.pop()),
+                            render: () => <NotificationCenterUI />,
+                        },
+                    }}
+                />
+            ));
+        };
 
         const IconButton = res.props.children.type;
         const originalProps = res.props.children.props;
@@ -90,4 +87,37 @@ export function patchYouBar(): () => void {
             </React.Fragment>
         );
     });
+}
+
+export function patchYouBar(): () => void {
+    // 1. Try finding it immediately if Metro already evaluated it
+    const existingComponent = findByTypeName("YouBarNotificationsButton");
+    if (existingComponent) {
+        applyTypePatch(existingComponent);
+    }
+
+    // 2. Intercept Metro's `findByTypeName` lookup so we catch it the exact millisecond Metro loads/requires it
+    const metroModule = findByProps("findByTypeName");
+    let unpatchMetroLookup: (() => void) | null = null;
+
+    if (metroModule) {
+        unpatchMetroLookup = after("findByTypeName", metroModule, ([name], result) => {
+            if (name === "YouBarNotificationsButton" && result) {
+                applyTypePatch(result);
+            }
+            return result;
+        });
+    }
+
+    // Cleanup hook
+    return () => {
+        if (unpatchButton) {
+            unpatchButton();
+            unpatchButton = null;
+        }
+        if (unpatchMetroLookup) {
+            unpatchMetroLookup();
+            unpatchMetroLookup = null;
+        }
+    };
 }
