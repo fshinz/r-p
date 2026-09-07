@@ -7,10 +7,6 @@ import SettingsUI from "./components/SettingsUI";
 
 let unpatchYouBar: (() => void) | null = null;
 
-/**
- * Triggers a Flux store re-render on components listening to UserStore (such as YouBar)
- * by emitting a CURRENT_USER_UPDATE payload without causing global navigation shifts.
- */
 export function refreshYouBarUI() {
     const Dispatcher = findByProps("dispatch", "subscribe");
     const UserStore = findByProps("getCurrentUser");
@@ -35,10 +31,10 @@ export default {
 
         initNotificationEngine();
 
-        // Patch YouBar icon components
+        // Sets up instant module interception hook
         unpatchYouBar = patchYouBar();
 
-        // Trigger initial Flux store pass to load patched elements
+        // Trigger Flux re-render pass
         refreshYouBarUI();
     },
 
