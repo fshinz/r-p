@@ -31,10 +31,8 @@ export default {
 
         initNotificationEngine();
 
-        // Bind patch to YouBarNotificationsButton.type
         unpatchYouBar = patchYouBar();
 
-        // Refresh navigation bar layout pass
         refreshYouBarUI();
     },
 
