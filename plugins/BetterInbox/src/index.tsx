@@ -1,44 +1,35 @@
 import { logger } from "@vendetta";
 import { findByProps } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
-import { patchYouBar } from "./youbar";
+import { patchYouBar, setYouBarReady } from "./youbar";
 import { initNotificationEngine, stopNotificationEngine } from "./notifications";
 import SettingsUI from "./components/SettingsUI";
 
 let unpatchYouBar: (() => void) | null = null;
 let watcherInterval: ReturnType<typeof setInterval> | null = null;
+let readyTimeout: ReturnType<typeof setTimeout> | null = null;
 
-function forceYouBarRefresh() {
+function triggerYouBarAnimation() {
     const AccessibilityStore = findByProps("setYouBarAnimations");
     if (typeof AccessibilityStore?.setYouBarAnimations === "function") {
-        logger.log("[BetterInbox] Triggering setYouBarAnimations refresh");
+        logger.log("[BetterInbox] Triggering setYouBarAnimations after boot deferral");
         AccessibilityStore.setYouBarAnimations(true);
-        return;
-    }
-
-    const UserStore = findByProps("getCurrentUser", "emitChange");
-    if (UserStore?.emitChange) {
-        logger.log("[BetterInbox] Triggering UserStore emitChange refresh");
-        UserStore.emitChange();
     }
 }
 
-function attemptPatch(): boolean {
-    if (unpatchYouBar) return true;
+function setupDeferredPatch() {
+    unpatchYouBar = patchYouBar();
 
-    try {
-        const cleanup = patchYouBar();
-        if (typeof cleanup === "function") {
-            unpatchYouBar = cleanup;
-            logger.log("[BetterInbox] Successfully patched YouBarButtonContainer");
-            
-            setTimeout(forceYouBarRefresh, 50);
-            return true;
-        }
-    } catch (e) {
-        logger.log(`[BetterInbox] Error patching YouBar: ${e}`);
+    if (unpatchYouBar) {
+        logger.log("[BetterInbox] Patch attached in passive mode (waiting for post-boot trigger)...");
+
+        // Wait for app to finish initial layout renders (e.g. 1-2 seconds after boot)
+        readyTimeout = setTimeout(() => {
+            logger.log("[BetterInbox] Activating patch & triggering YouBar animation");
+            setYouBarReady(true);
+            triggerYouBarAnimation();
+        }, 1500);
     }
-    return false;
 }
 
 export default {
@@ -50,30 +41,27 @@ export default {
         storage.showInboxButton ??= true;
 
         initNotificationEngine();
+        setYouBarReady(false);
 
-        if (!attemptPatch()) {
-            logger.log("[BetterInbox] Module 16392 not ready yet, starting watcher interval");
-            let attempts = 0;
-            watcherInterval = setInterval(() => {
-                attempts++;
-                const success = attemptPatch();
+        // Poll for Metro module readiness, then attach in passive mode
+        watcherInterval = setInterval(() => {
+            const YouBarModule = findByProps("YouBarButtonContainer");
+            if (YouBarModule?.YouBarButtonContainer) {
+                if (watcherInterval) clearInterval(watcherInterval);
+                watcherInterval = null;
 
-                if (success || attempts > 40) {
-                    if (watcherInterval) clearInterval(watcherInterval);
-                    watcherInterval = null;
-                    if (!success) logger.log("[BetterInbox] Watcher timed out finding YouBar");
-                }
-            }, 200);
-        }
+                setupDeferredPatch();
+            }
+        }, 200);
     },
 
     onUnload: () => {
         logger.log("[BetterInbox] Unloading plugin...");
 
-        if (watcherInterval) {
-            clearInterval(watcherInterval);
-            watcherInterval = null;
-        }
+        setYouBarReady(false);
+
+        if (watcherInterval) clearInterval(watcherInterval);
+        if (readyTimeout) clearTimeout(readyTimeout);
 
         if (unpatchYouBar) {
             unpatchYouBar();
@@ -81,7 +69,7 @@ export default {
         }
 
         stopNotificationEngine();
-        forceYouBarRefresh();
+        triggerYouBarAnimation();
     },
 
     settings: SettingsUI,
