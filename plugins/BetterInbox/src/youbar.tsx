@@ -75,11 +75,9 @@ function YouBarCustomButtons({ originalProps, IconButton }: any) {
 }
 
 export function patchYouBar(): (() => void) | null {
-    // Look up the actual React component function directly
     const YouBarNotificationsButton = findByTypeName("YouBarNotificationsButton");
     if (!YouBarNotificationsButton) return null;
 
-    // Direct function patch using after("type", ...) for functional React components
     return after("type", YouBarNotificationsButton, (_, res) => {
         if (!res?.props?.children) return res;
 
