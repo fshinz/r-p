@@ -1,4 +1,4 @@
-import { findByProps, findByName } from "@vendetta/metro";
+import { findByTypeName, findByProps } from "@vendetta/metro";
 import { React } from "@vendetta/metro/common";
 import { after } from "@vendetta/patcher";
 import { storage } from "@vendetta/plugin";
@@ -15,7 +15,7 @@ function YouBarCustomButtons({ originalProps, IconButton }: any) {
 
     const openInbox = () => {
         const Navigation = findByProps("push", "pushLazy", "pop");
-        const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
+        const Navigator = findByProps("Navigator")?.Navigator;
         const modalCloseButton =
             findByProps("getRenderCloseButton")?.getRenderCloseButton ??
             findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
@@ -75,40 +75,22 @@ function YouBarCustomButtons({ originalProps, IconButton }: any) {
 }
 
 export function patchYouBar(): (() => void) | null {
-    const YouBarModule = findByProps("YouBarNotificationsButton") || findByProps("YouBar");
-    
-    if (YouBarModule?.YouBarNotificationsButton) {
-        return after("YouBarNotificationsButton", YouBarModule, (_, res) => {
-            if (!res?.props?.children) return res;
-            
-            const IconButton = res.props.children.type;
-            const originalProps = res.props.children.props;
+    // Look up the actual React component function directly
+    const YouBarNotificationsButton = findByTypeName("YouBarNotificationsButton");
+    if (!YouBarNotificationsButton) return null;
 
-            return (
-                <YouBarCustomButtons 
-                    IconButton={IconButton} 
-                    originalProps={originalProps} 
-                />
-            );
-        });
-    }
+    // Direct function patch using after("type", ...) for functional React components
+    return after("type", YouBarNotificationsButton, (_, res) => {
+        if (!res?.props?.children) return res;
 
-    const YouBarDirect = findByName("YouBarNotificationsButton", false);
-    if (YouBarDirect) {
-        return after("default", YouBarDirect, (_, res) => {
-            if (!res?.props?.children) return res;
+        const IconButton = res.props.children.type;
+        const originalProps = res.props.children.props;
 
-            const IconButton = res.props.children.type;
-            const originalProps = res.props.children.props;
-
-            return (
-                <YouBarCustomButtons 
-                    IconButton={IconButton} 
-                    originalProps={originalProps} 
-                />
-            );
-        });
-    }
-
-    return null;
+        return (
+            <YouBarCustomButtons
+                IconButton={IconButton}
+                originalProps={originalProps}
+            />
+        );
+    });
 }
