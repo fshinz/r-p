@@ -49,7 +49,6 @@ export function patchYouBar(): () => void {
         const res = OriginalRender(...args);
         if (!res?.props?.children) return res;
 
-        // Extract internal IconButton component and native layout props
         const IconButton = res.props.children.type;
         const originalProps = res.props.children.props;
 
@@ -92,4 +91,3 @@ export function patchYouBar(): () => void {
         );
     });
 }
-
