@@ -6,7 +6,18 @@ import SettingsUI from "./components/SettingsUI";
 
 let unpatchYouBar: (() => void) | null = null;
 let watcherInterval: ReturnType<typeof setInterval> | null = null;
-let unbindTypingListener: (() => void) | null = null;
+
+// Solves the post-render race condition by triggering Flux state recalculation
+function triggerNavReRender() {
+    const UserStore = findByProps("getCurrentUser", "emitChange");
+    const UnreadStore = findByProps("getUnreadCount", "emitChange");
+
+    if (UserStore?.emitChange) {
+        UserStore.emitChange();
+    } else if (UnreadStore?.emitChange) {
+        UnreadStore.emitChange();
+    }
+}
 
 function attemptPatch(): boolean {
     if (unpatchYouBar) return true;
@@ -15,39 +26,15 @@ function attemptPatch(): boolean {
         const cleanup = patchYouBar();
         if (typeof cleanup === "function") {
             unpatchYouBar = cleanup;
+            
+            // Component was patched after initial mount; force immediate VDOM reconciliation
+            setTimeout(triggerNavReRender, 50);
             return true;
         }
     } catch (e) {
-        console.error("[BetterInbox] Failed patching YouBar:", e);
+        console.error("[BetterInbox] Patch error:", e);
     }
     return false;
-}
-
-function setupTypingListener() {
-    // 1. Hook into Discord's internal TypingStore or Text Input action dispatchers
-    const TypingModule = findByProps("startTyping", "stopTyping") || findByProps("isTyping");
-    const ChatInputStore = findByProps("getDraft", "addChangeListener");
-
-    const onTypingOrInput = () => {
-        if (!unpatchYouBar) {
-            attemptPatch();
-        }
-    };
-
-    // 2. Attach store change listener on draft/input changes
-    if (ChatInputStore?.addChangeListener) {
-        ChatInputStore.addChangeListener(onTypingOrInput);
-        unbindTypingListener = () => ChatInputStore.removeChangeListener(onTypingOrInput);
-    }
-
-    // 3. Patch startTyping function execution to catch immediate keypresses
-    if (TypingModule?.startTyping && typeof TypingModule.startTyping === "function") {
-        const origStartTyping = TypingModule.startTyping;
-        TypingModule.startTyping = function (...args: any[]) {
-            onTypingOrInput();
-            return origStartTyping.apply(this, args);
-        };
-    }
 }
 
 export default {
@@ -58,18 +45,20 @@ export default {
 
         initNotificationEngine();
 
-        // Immediate patch attempt on plugin load
-        attemptPatch();
+        // 1. Immediate attempt on cold boot
+        if (!attemptPatch()) {
+            // 2. Poll until Metro exposes YouBar, then force the initial render update
+            let attempts = 0;
+            watcherInterval = setInterval(() => {
+                attempts++;
+                const success = attemptPatch();
 
-        // Polling loop fallback
-        watcherInterval = setInterval(() => {
-            if (!unpatchYouBar) {
-                attemptPatch();
-            }
-        }, 300);
-
-        // Link patch checks directly to text input / typing events
-        setupTypingListener();
+                if (success || attempts > 40) {
+                    if (watcherInterval) clearInterval(watcherInterval);
+                    watcherInterval = null;
+                }
+            }, 200);
+        }
     },
 
     onUnload: () => {
@@ -78,17 +67,13 @@ export default {
             watcherInterval = null;
         }
 
-        if (unbindTypingListener) {
-            unbindTypingListener();
-            unbindTypingListener = null;
-        }
-
         if (unpatchYouBar) {
             unpatchYouBar();
             unpatchYouBar = null;
         }
 
         stopNotificationEngine();
+        triggerNavReRender();
     },
 
     settings: SettingsUI,
