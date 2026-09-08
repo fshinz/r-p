@@ -1,17 +1,16 @@
 import { logger } from "@vendetta";
-import { findByProps, findByTypeName, findByName } from "@vendetta/metro";
+import { findByProps, findByName, findByTypeName } from "@vendetta/metro";
 import { React } from "@vendetta/metro/common";
-import { after } from "@vendetta/patcher";
+import { after, before } from "@vendetta/patcher";
 import { storage } from "@vendetta/plugin";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 
-let unpatchType: (() => void) | null = null;
 let isPatched = false;
 
 const FluxDispatcher = findByProps("dispatch", "subscribe", "_actionHandlers");
 
-function forceNavigationRerender(): void {
+export function forceNavigationRerender(): void {
     if (!FluxDispatcher) return;
 
     try {
@@ -28,107 +27,113 @@ function forceNavigationRerender(): void {
     }
 }
 
-function applyTypePatch(targetComponent: any, cleanups: (() => void)[]): boolean {
-    if (unpatchType || !targetComponent?.type) return false;
+function renderCustomButtons(res: any) {
+    if (!res?.props?.children) return res;
 
-    logger.log("[BetterInbox] Successfully hooked YouBarNotificationsButton.type");
+    const Navigation = findByProps("push", "pushLazy", "pop");
+    const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
+    const modalCloseButton =
+        findByProps("getRenderCloseButton")?.getRenderCloseButton ??
+        findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
 
-    unpatchType = after("type", targetComponent, (_, res) => {
-        if (!res?.props?.children) return res;
+    const userSettingsAction = findByProps("openUserSettings");
+    const transitionModule = findByProps("transitionToGuild");
 
-        const Navigation = findByProps("push", "pushLazy", "pop");
-        const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
-        const modalCloseButton =
-            findByProps("getRenderCloseButton")?.getRenderCloseButton ??
-            findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
+    const BellIcon = getAssetIDByName("BellIcon") || getAssetIDByName("NotificationBellIcon");
+    const SettingsIcon = getAssetIDByName("SettingsIcon");
+    const ChatIcon = getAssetIDByName("ChatIcon");
 
-        const userSettingsAction = findByProps("openUserSettings");
-        const transitionModule = findByProps("transitionToGuild");
+    const openInbox = () => {
+        if (!Navigator || !Navigation?.push) return;
+        Navigation.push(() => (
+            <Navigator
+                initialRouteName="YouBarInbox"
+                goBackOnBackPress
+                screens={{
+                    YouBarInbox: {
+                        title: "Inbox",
+                        headerLeft: modalCloseButton?.(() => Navigation.pop()),
+                        render: () => <NotificationCenterUI />,
+                    },
+                }}
+            />
+        ));
+    };
 
-        const BellIcon = getAssetIDByName("BellIcon") || getAssetIDByName("NotificationBellIcon");
-        const SettingsIcon = getAssetIDByName("SettingsIcon");
-        const ChatIcon = getAssetIDByName("ChatIcon");
+    const IconButton = res.props.children.type;
+    const originalProps = res.props.children.props;
 
-        const openInbox = () => {
-            if (!Navigator || !Navigation?.push) return;
-            Navigation.push(() => (
-                <Navigator
-                    initialRouteName="YouBarInbox"
-                    goBackOnBackPress
-                    screens={{
-                        YouBarInbox: {
-                            title: "Inbox",
-                            headerLeft: modalCloseButton?.(() => Navigation.pop()),
-                            render: () => <NotificationCenterUI />,
-                        },
-                    }}
+    if (!IconButton) return res;
+
+    return (
+        <React.Fragment>
+            {storage.showDMButton && (
+                <IconButton
+                    key="betterinbox-dm"
+                    variant={originalProps?.variant || "tertiary"}
+                    size={originalProps?.size || "sm"}
+                    icon={ChatIcon}
+                    onPress={() => transitionModule?.transitionToGuild?.("@me")}
                 />
-            ));
-        };
+            )}
 
-        const IconButton = res.props.children.type;
-        const originalProps = res.props.children.props;
+            {storage.showSettingsButton && (
+                <IconButton
+                    key="betterinbox-settings"
+                    variant={originalProps?.variant || "tertiary"}
+                    size={originalProps?.size || "sm"}
+                    icon={SettingsIcon}
+                    onPress={() => userSettingsAction?.openUserSettings?.()}
+                />
+            )}
 
-        if (!IconButton) return res;
-
-        return (
-            <React.Fragment>
-                {storage.showDMButton && (
-                    <IconButton
-                        key="betterinbox-dm"
-                        variant={originalProps?.variant || "tertiary"}
-                        size={originalProps?.size || "sm"}
-                        icon={ChatIcon}
-                        onPress={() => transitionModule?.transitionToGuild?.("@me")}
-                    />
-                )}
-
-                {storage.showSettingsButton && (
-                    <IconButton
-                        key="betterinbox-settings"
-                        variant={originalProps?.variant || "tertiary"}
-                        size={originalProps?.size || "sm"}
-                        icon={SettingsIcon}
-                        onPress={() => userSettingsAction?.openUserSettings?.()}
-                    />
-                )}
-
-                {storage.showInboxButton ? (
-                    <IconButton
-                        key="betterinbox-inbox"
-                        variant={originalProps?.variant || "tertiary"}
-                        size={originalProps?.size || "sm"}
-                        icon={BellIcon || originalProps?.icon}
-                        onPress={openInbox}
-                    />
-                ) : (
-                    res
-                )}
-            </React.Fragment>
-        );
-    });
-
-    cleanups.push(() => {
-        if (unpatchType) {
-            unpatchType();
-            unpatchType = null;
-        }
-    });
-
-    forceNavigationRerender();
-    return true;
+            {storage.showInboxButton ? (
+                <IconButton
+                    key="betterinbox-inbox"
+                    variant={originalProps?.variant || "tertiary"}
+                    size={originalProps?.size || "sm"}
+                    icon={BellIcon || originalProps?.icon}
+                    onPress={openInbox}
+                />
+            ) : (
+                res
+            )}
+        </React.Fragment>
+    );
 }
 
-export function rescanAndPatchYouBar(cleanups: (() => void)[]): boolean {
+export function setupYouBarHooks(cleanups: (() => void)[]): boolean {
     if (isPatched) return true;
 
-    // Direct module lookup scan
-    const targetComponent = findByTypeName("YouBarNotificationsButton");
-    if (targetComponent) {
-        if (applyTypePatch(targetComponent, cleanups)) {
-            isPatched = true;
-            return true;
+    // 1. Scan direct Metro component lookup
+    const targetComp = findByTypeName("YouBarNotificationsButton") || findByName("YouBarNotificationsButton");
+
+    if (targetComp) {
+        if (targetComp.type) {
+            const unpatch = after("type", targetComp, (_, res) => renderCustomButtons(res));
+            cleanups.push(unpatch);
+        } else if (typeof targetComp === "function") {
+            const unpatch = after("render", targetComp.prototype ? targetComp.prototype : targetComp, (_, res) => renderCustomButtons(res));
+            cleanups.push(unpatch);
         }
+        isPatched = true;
+        forceNavigationRerender();
+        return true;
+    }
+
+    // 2. Fallback: Hook Metro's search export pipeline directly
+    const metroSearch = findByProps("findByTypeName", "findByName");
+    if (metroSearch) {
+        const unpatchType = after("findByTypeName", metroSearch, ([name], result) => {
+            if (name === "YouBarNotificationsButton" && result?.type && !isPatched) {
+                const unpatch = after("type", result, (_, res) => renderCustomButtons(res));
+                cleanups.push(unpatch);
+                isPatched = true;
+                forceNavigationRerender();
+            }
+            return result;
+        });
+        cleanups.push(unpatchType);
     }
 
     return false;
@@ -136,9 +141,5 @@ export function rescanAndPatchYouBar(cleanups: (() => void)[]): boolean {
 
 export function resetYouBarPatchState(): void {
     isPatched = false;
-    if (unpatchType) {
-        unpatchType();
-        unpatchType = null;
-    }
     forceNavigationRerender();
 }
