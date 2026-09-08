@@ -1,5 +1,5 @@
 import { logger } from "@vendetta";
-import { findByProps, findByName, findByTypeName } from "@vendetta/metro";
+import { findByProps, findByTypeName, findByName } from "@vendetta/metro";
 import { React } from "@vendetta/metro/common";
 import { after } from "@vendetta/patcher";
 import { storage } from "@vendetta/plugin";
@@ -7,10 +7,7 @@ import { getAssetIDByName } from "@vendetta/ui/assets";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 
 let unpatchType: (() => void) | null = null;
-
-// ---------------------------------------------------------------------------
-// Flux Re-Render Trigger
-// ---------------------------------------------------------------------------
+let isPatched = false;
 
 const FluxDispatcher = findByProps("dispatch", "subscribe", "_actionHandlers");
 
@@ -31,12 +28,8 @@ function forceNavigationRerender(): void {
     }
 }
 
-// ---------------------------------------------------------------------------
-// YouBar Patching Logic
-// ---------------------------------------------------------------------------
-
-function applyTypePatch(targetComponent: any) {
-    if (unpatchType || !targetComponent?.type) return;
+function applyTypePatch(targetComponent: any, cleanups: (() => void)[]): boolean {
+    if (unpatchType || !targetComponent?.type) return false;
 
     logger.log("[BetterInbox] Successfully hooked YouBarNotificationsButton.type");
 
@@ -115,40 +108,37 @@ function applyTypePatch(targetComponent: any) {
         );
     });
 
-    // Re-render navigation UI instantly as soon as patch lands
-    forceNavigationRerender();
-}
-
-export function patchYouBar(): () => void {
-    // 1. Check if the module was already evaluated by Metro before plugin load
-    const existingComponent = findByTypeName("YouBarNotificationsButton");
-    if (existingComponent) {
-        applyTypePatch(existingComponent);
-    }
-
-    // 2. Intercept Metro's lookup so we trap the component the instant Discord loads it
-    const metroModule = findByProps("findByTypeName");
-    let unpatchMetro: (() => void) | null = null;
-
-    if (metroModule) {
-        unpatchMetro = after("findByTypeName", metroModule, ([typeName], result) => {
-            if (typeName === "YouBarNotificationsButton" && result) {
-                applyTypePatch(result);
-            }
-            return result;
-        });
-    }
-
-    return () => {
+    cleanups.push(() => {
         if (unpatchType) {
             unpatchType();
             unpatchType = null;
         }
-        if (unpatchMetro) {
-            unpatchMetro();
-            unpatchMetro = null;
+    });
+
+    forceNavigationRerender();
+    return true;
+}
+
+export function rescanAndPatchYouBar(cleanups: (() => void)[]): boolean {
+    if (isPatched) return true;
+
+    // Direct module lookup scan
+    const targetComponent = findByTypeName("YouBarNotificationsButton");
+    if (targetComponent) {
+        if (applyTypePatch(targetComponent, cleanups)) {
+            isPatched = true;
+            return true;
         }
-        // Force navigation to drop custom buttons when plugin unloads
-        forceNavigationRerender();
-    };
+    }
+
+    return false;
+}
+
+export function resetYouBarPatchState(): void {
+    isPatched = false;
+    if (unpatchType) {
+        unpatchType();
+        unpatchType = null;
+    }
+    forceNavigationRerender();
 }
