@@ -6,14 +6,14 @@ import { storage } from "@vendetta/plugin";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 
-let unpatchButton: (() => void) | null = null;
+let unpatchType: (() => void) | null = null;
 
-function applyTypePatch(YouBarNotificationsButton: any) {
-    if (unpatchButton || !YouBarNotificationsButton?.type) return;
+function applyTypePatch(targetComponent: any) {
+    if (unpatchType || !targetComponent?.type) return;
 
-    logger.log("[BetterInbox] Hooked YouBarNotificationsButton.type");
+    logger.log("[BetterInbox] Successfully hooked YouBarNotificationsButton.type");
 
-    unpatchButton = after("type", YouBarNotificationsButton, (_, res) => {
+    unpatchType = after("type", targetComponent, (_, res) => {
         if (!res?.props?.children) return res;
 
         const Navigation = findByProps("push", "pushLazy", "pop");
@@ -90,34 +90,33 @@ function applyTypePatch(YouBarNotificationsButton: any) {
 }
 
 export function patchYouBar(): () => void {
-    // 1. Try finding it immediately if Metro already evaluated it
+    // 1. Check if the module was already evaluated by Metro before plugin load
     const existingComponent = findByTypeName("YouBarNotificationsButton");
     if (existingComponent) {
         applyTypePatch(existingComponent);
     }
 
-    // 2. Intercept Metro's `findByTypeName` lookup so we catch it the exact millisecond Metro loads/requires it
+    // 2. Intercept Metro's lookup so we trap the component the instant Discord loads it
     const metroModule = findByProps("findByTypeName");
-    let unpatchMetroLookup: (() => void) | null = null;
+    let unpatchMetro: (() => void) | null = null;
 
     if (metroModule) {
-        unpatchMetroLookup = after("findByTypeName", metroModule, ([name], result) => {
-            if (name === "YouBarNotificationsButton" && result) {
+        unpatchMetro = after("findByTypeName", metroModule, ([typeName], result) => {
+            if (typeName === "YouBarNotificationsButton" && result) {
                 applyTypePatch(result);
             }
             return result;
         });
     }
 
-    // Cleanup hook
     return () => {
-        if (unpatchButton) {
-            unpatchButton();
-            unpatchButton = null;
+        if (unpatchType) {
+            unpatchType();
+            unpatchType = null;
         }
-        if (unpatchMetroLookup) {
-            unpatchMetroLookup();
-            unpatchMetroLookup = null;
+        if (unpatchMetro) {
+            unpatchMetro();
+            unpatchMetro = null;
         }
     };
 }
