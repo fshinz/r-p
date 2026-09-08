@@ -1,7 +1,7 @@
 import { logger } from "@vendetta";
 import { findByProps, findByName, findByTypeName } from "@vendetta/metro";
 import { React } from "@vendetta/metro/common";
-import { after, before } from "@vendetta/patcher";
+import { after } from "@vendetta/patcher";
 import { storage } from "@vendetta/plugin";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import NotificationCenterUI from "./components/NotificationCenterUI";
@@ -105,7 +105,6 @@ function renderCustomButtons(res: any) {
 export function setupYouBarHooks(cleanups: (() => void)[]): boolean {
     if (isPatched) return true;
 
-    // 1. Scan direct Metro component lookup
     const targetComp = findByTypeName("YouBarNotificationsButton") || findByName("YouBarNotificationsButton");
 
     if (targetComp) {
@@ -121,7 +120,6 @@ export function setupYouBarHooks(cleanups: (() => void)[]): boolean {
         return true;
     }
 
-    // 2. Fallback: Hook Metro's search export pipeline directly
     const metroSearch = findByProps("findByTypeName", "findByName");
     if (metroSearch) {
         const unpatchType = after("findByTypeName", metroSearch, ([name], result) => {
@@ -137,6 +135,10 @@ export function setupYouBarHooks(cleanups: (() => void)[]): boolean {
     }
 
     return false;
+}
+
+export function rescanAndPatchYouBar(cleanups: (() => void)[]): boolean {
+    return setupYouBarHooks(cleanups);
 }
 
 export function resetYouBarPatchState(): void {
