@@ -6,7 +6,7 @@ export default {
         logger.log("Hello world!");
     },
     onUnload: () => {
-        logger.log("Goodbye, world.");
+        logger.log("Goodbye, world dhfhdhahha.");
     },
     settings: Settings,
 }
