@@ -10,7 +10,6 @@ const cleanups: (() => void)[] = [];
 export function refreshYouBarUI() {
     const Dispatcher = findByProps("dispatch", "subscribe");
     const UserStore = findByProps("getCurrentUser");
-
     const currentUser = UserStore?.getCurrentUser();
 
     if (Dispatcher?.dispatch && currentUser) {
@@ -19,6 +18,10 @@ export function refreshYouBarUI() {
             user: currentUser,
         });
     }
+}
+
+function runPatchScan() {
+    rescanAndPatchYouBar(cleanups);
 }
 
 export default {
@@ -31,19 +34,33 @@ export default {
 
         initNotificationEngine();
 
+        // 1. Initial scanning loop for instant startup
         let attempts = 0;
-
-        // Continuous scanning loop until YouBar component is found in Metro
         const scanInterval = setInterval(() => {
             const patched = rescanAndPatchYouBar(cleanups);
             attempts++;
-
             if (patched || attempts > 60) {
                 clearInterval(scanInterval);
             }
         }, 100);
-
         cleanups.push(() => clearInterval(scanInterval));
+
+        // 2. Navigation & App State Event Link (ServerDrawer pattern)
+        // Hooks Flux navigation events so every tab change or screen transition re-triggers the patch check
+        const FluxDispatcher = findByProps("dispatch", "subscribe");
+        if (FluxDispatcher?.subscribe) {
+            const handleNavEvent = () => runPatchScan();
+
+            FluxDispatcher.subscribe("NAVIGATION_SWITCH", handleNavEvent);
+            FluxDispatcher.subscribe("SIDEBAR_VIEW", handleNavEvent);
+            FluxDispatcher.subscribe("CHANNEL_SELECT", handleNavEvent);
+
+            cleanups.push(() => {
+                FluxDispatcher.unsubscribe("NAVIGATION_SWITCH", handleNavEvent);
+                FluxDispatcher.unsubscribe("SIDEBAR_VIEW", handleNavEvent);
+                FluxDispatcher.unsubscribe("CHANNEL_SELECT", handleNavEvent);
+            });
+        }
 
         refreshYouBarUI();
     },
