@@ -1,27 +1,14 @@
 import { logger } from "@vendetta";
 import { findByProps } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
-import { rescanAndPatchYouBar, resetYouBarPatchState } from "./youbar";
+import { setupYouBarHooks, resetYouBarPatchState, forceNavigationRerender } from "./youbar";
 import { initNotificationEngine, stopNotificationEngine } from "./notifications";
 import SettingsUI from "./components/SettingsUI";
 
 const cleanups: (() => void)[] = [];
 
 export function refreshYouBarUI() {
-    const Dispatcher = findByProps("dispatch", "subscribe");
-    const UserStore = findByProps("getCurrentUser");
-    const currentUser = UserStore?.getCurrentUser();
-
-    if (Dispatcher?.dispatch && currentUser) {
-        Dispatcher.dispatch({
-            type: "CURRENT_USER_UPDATE",
-            user: currentUser,
-        });
-    }
-}
-
-function runPatchScan() {
-    rescanAndPatchYouBar(cleanups);
+    forceNavigationRerender();
 }
 
 export default {
@@ -34,31 +21,32 @@ export default {
 
         initNotificationEngine();
 
-        // 1. Initial scanning loop for instant startup
+        // High-frequency startup polling
         let attempts = 0;
         const scanInterval = setInterval(() => {
-            const patched = rescanAndPatchYouBar(cleanups);
+            const success = setupYouBarHooks(cleanups);
             attempts++;
-            if (patched || attempts > 60) {
+
+            if (success || attempts > 100) {
                 clearInterval(scanInterval);
             }
-        }, 100);
+        }, 50);
+
         cleanups.push(() => clearInterval(scanInterval));
 
-        // 2. Navigation & App State Event Link (ServerDrawer pattern)
-        // Hooks Flux navigation events so every tab change or screen transition re-triggers the patch check
-        const FluxDispatcher = findByProps("dispatch", "subscribe");
-        if (FluxDispatcher?.subscribe) {
-            const handleNavEvent = () => runPatchScan();
+        // Subscribes to Discord Flux Navigation Dispatcher
+        const Dispatcher = findByProps("dispatch", "subscribe");
+        if (Dispatcher?.subscribe) {
+            const navHandler = () => setupYouBarHooks(cleanups);
 
-            FluxDispatcher.subscribe("NAVIGATION_SWITCH", handleNavEvent);
-            FluxDispatcher.subscribe("SIDEBAR_VIEW", handleNavEvent);
-            FluxDispatcher.subscribe("CHANNEL_SELECT", handleNavEvent);
+            Dispatcher.subscribe("NAVIGATION_SWITCH", navHandler);
+            Dispatcher.subscribe("TRACK", navHandler);
+            Dispatcher.subscribe("POST_CONNECTION_OPEN", navHandler);
 
             cleanups.push(() => {
-                FluxDispatcher.unsubscribe("NAVIGATION_SWITCH", handleNavEvent);
-                FluxDispatcher.unsubscribe("SIDEBAR_VIEW", handleNavEvent);
-                FluxDispatcher.unsubscribe("CHANNEL_SELECT", handleNavEvent);
+                Dispatcher.unsubscribe("NAVIGATION_SWITCH", navHandler);
+                Dispatcher.unsubscribe("TRACK", navHandler);
+                Dispatcher.unsubscribe("POST_CONNECTION_OPEN", navHandler);
             });
         }
 
@@ -79,7 +67,6 @@ export default {
 
         resetYouBarPatchState();
         stopNotificationEngine();
-        refreshYouBarUI();
     },
 
     settings: SettingsUI,
