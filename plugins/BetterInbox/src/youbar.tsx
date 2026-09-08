@@ -1,116 +1,155 @@
 import { logger } from "@vendetta";
+import { findByProps, findByName, findByTypeName } from "@vendetta/metro";
 import { React } from "@vendetta/metro/common";
 import { after } from "@vendetta/patcher";
 import { storage } from "@vendetta/plugin";
-import { findByProps, findByName } from "@vendetta/metro";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 
-let unpatchCreateElement: (() => void) | null = null;
+let unpatchType: (() => void) | null = null;
 
-export function patchYouBar(): () => void {
-    if (unpatchCreateElement) return () => {};
+// ---------------------------------------------------------------------------
+// Flux Navigation Re-render Trigger
+// ---------------------------------------------------------------------------
 
-    logger.log("[BetterInbox] Hooking React.createElement directly (No Metro lookups)");
+const FluxDispatcher = findByProps("dispatch", "subscribe", "_actionHandlers");
 
-    // Hook React's rendering pipeline directly
-    unpatchCreateElement = after("createElement", React, ([type, props], res) => {
-        // Inspect every rendered element on the fly without Metro searching
-        if (type?.displayName !== "YouBarNotificationsButton" && type?.typeName !== "YouBarNotificationsButton") {
-            return res;
-        }
+function forceNavigationRerender(): void {
+    if (!FluxDispatcher) return;
 
-        // If it's YouBarNotificationsButton, intercept its children
-        const targetType = res?.type;
-        if (!targetType) return res;
-
-        return React.cloneElement(res, {
-            ...res.props,
-            children: (...args: any[]) => {
-                const childRes = typeof res.props?.children === "function" 
-                    ? res.props.children(...args) 
-                    : res.props?.children;
-
-                if (!childRes?.props?.children) return childRes;
-
-                const Navigation = findByProps("push", "pushLazy", "pop");
-                const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
-                const modalCloseButton =
-                    findByProps("getRenderCloseButton")?.getRenderCloseButton ??
-                    findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
-
-                const userSettingsAction = findByProps("openUserSettings");
-                const transitionModule = findByProps("transitionToGuild");
-
-                const BellIcon = getAssetIDByName("BellIcon") || getAssetIDByName("NotificationBellIcon");
-                const SettingsIcon = getAssetIDByName("SettingsIcon");
-                const ChatIcon = getAssetIDByName("ChatIcon");
-
-                const openInbox = () => {
-                    if (!Navigator || !Navigation?.push) return;
-                    Navigation.push(() => (
-                        <Navigator
-                            initialRouteName="YouBarInbox"
-                            goBackOnBackPress
-                            screens={{
-                                YouBarInbox: {
-                                    title: "Inbox",
-                                    headerLeft: modalCloseButton?.(() => Navigation.pop()),
-                                    render: () => <NotificationCenterUI />,
-                                },
-                            }}
-                        />
-                    ));
-                };
-
-                const IconButton = childRes.props.children.type;
-                const originalProps = childRes.props.children.props;
-
-                if (!IconButton) return childRes;
-
-                return (
-                    <React.Fragment>
-                        {storage.showDMButton && (
-                            <IconButton
-                                key="betterinbox-dm"
-                                variant={originalProps?.variant || "tertiary"}
-                                size={originalProps?.size || "sm"}
-                                icon={ChatIcon}
-                                onPress={() => transitionModule?.transitionToGuild?.("@me")}
-                            />
-                        )}
-
-                        {storage.showSettingsButton && (
-                            <IconButton
-                                key="betterinbox-settings"
-                                variant={originalProps?.variant || "tertiary"}
-                                size={originalProps?.size || "sm"}
-                                icon={SettingsIcon}
-                                onPress={() => userSettingsAction?.openUserSettings?.()}
-                            />
-                        )}
-
-                        {storage.showInboxButton ? (
-                            <IconButton
-                                key="betterinbox-inbox"
-                                variant={originalProps?.variant || "tertiary"}
-                                size={originalProps?.size || "sm"}
-                                icon={BellIcon || originalProps?.icon}
-                                onPress={openInbox}
-                            />
-                        ) : (
-                            childRes
-                        )}
-                    </React.Fragment>
-                );
-            }
+    try {
+        FluxDispatcher.dispatch({
+            type: "OVERLAY_SET_FLUX_STORES_DESERIALIZED",
         });
+        FluxDispatcher.dispatch({
+            type: "USER_SETTINGS_PROTO_UPDATE",
+            settings: { type: 0, proto: {} },
+            partial: true,
+        });
+    } catch (err) {
+        logger.log(`[BetterInbox] Flux dispatch re-render failed: ${err}`);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Patch Implementation
+// ---------------------------------------------------------------------------
+
+function applyTypePatch(targetComponent: any) {
+    if (unpatchType || !targetComponent?.type) return;
+
+    logger.log("[BetterInbox] Successfully hooked YouBarNotificationsButton.type");
+
+    unpatchType = after("type", targetComponent, (_, res) => {
+        if (!res?.props?.children) return res;
+
+        const Navigation = findByProps("push", "pushLazy", "pop");
+        const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
+        const modalCloseButton =
+            findByProps("getRenderCloseButton")?.getRenderCloseButton ??
+            findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
+
+        const userSettingsAction = findByProps("openUserSettings");
+        const transitionModule = findByProps("transitionToGuild");
+
+        const BellIcon = getAssetIDByName("BellIcon") || getAssetIDByName("NotificationBellIcon");
+        const SettingsIcon = getAssetIDByName("SettingsIcon");
+        const ChatIcon = getAssetIDByName("ChatIcon");
+
+        const openInbox = () => {
+            if (!Navigator || !Navigation?.push) return;
+            Navigation.push(() => (
+                <Navigator
+                    initialRouteName="YouBarInbox"
+                    goBackOnBackPress
+                    screens={{
+                        YouBarInbox: {
+                            title: "Inbox",
+                            headerLeft: modalCloseButton?.(() => Navigation.pop()),
+                            render: () => <NotificationCenterUI />,
+                        },
+                    }}
+                />
+            ));
+        };
+
+        const IconButton = res.props.children.type;
+        const originalProps = res.props.children.props;
+
+        if (!IconButton) return res;
+
+        return (
+            <React.Fragment>
+                {storage.showDMButton && (
+                    <IconButton
+                        key="betterinbox-dm"
+                        variant={originalProps?.variant || "tertiary"}
+                        size={originalProps?.size || "sm"}
+                        icon={ChatIcon}
+                        onPress={() => transitionModule?.transitionToGuild?.("@me")}
+                    />
+                )}
+
+                {storage.showSettingsButton && (
+                    <IconButton
+                        key="betterinbox-settings"
+                        variant={originalProps?.variant || "tertiary"}
+                        size={originalProps?.size || "sm"}
+                        icon={SettingsIcon}
+                        onPress={() => userSettingsAction?.openUserSettings?.()}
+                    />
+                )}
+
+                {storage.showInboxButton ? (
+                    <IconButton
+                        key="betterinbox-inbox"
+                        variant={originalProps?.variant || "tertiary"}
+                        size={originalProps?.size || "sm"}
+                        icon={BellIcon || originalProps?.icon}
+                        onPress={openInbox}
+                    />
+                ) : (
+                    res
+                )}
+            </React.Fragment>
+        );
     });
 
+    // Dispatch re-render immediately once the component is patched
+    forceNavigationRerender();
+}
+
+export function patchYouBar(): () => void {
+    // 1. Check if the module was already evaluated by Metro before plugin load
+    const existingComponent = findByTypeName("YouBarNotificationsButton");
+    if (existingComponent) {
+        applyTypePatch(existingComponent);
+    }
+
+    // 2. Intercept Metro's lookup so we trap the component the instant Discord loads it
+    const metroModule = findByProps("findByTypeName");
+    let unpatchMetro: (() => void) | null = null;
+
+    if (metroModule) {
+        unpatchMetro = after("findByTypeName", metroModule, ([typeName], result) => {
+            if (typeName === "YouBarNotificationsButton" && result) {
+                applyTypePatch(result);
+            }
+            return result;
+        });
+    }
+
     return () => {
-        if (unpatchCreateElement) {
-            unpatchCreateElement();
-            unpatchCreateElement = null;
+        if (unpatchType) {
+            unpatchType();
+            unpatchType = null;
         }
+        if (unpatchMetro) {
+            unpatchMetro();
+            unpatchMetro = null;
+        }
+
+        // Force Discord to drop custom buttons and re-render stock UI when unmounted
+        forceNavigationRerender();
     };
 }
