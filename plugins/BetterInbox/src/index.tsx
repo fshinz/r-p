@@ -1,11 +1,11 @@
 import { logger } from "@vendetta";
 import { findByProps } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
-import { patchYouBar } from "./youbar";
+import { rescanAndPatchYouBar, resetYouBarPatchState } from "./youbar";
 import { initNotificationEngine, stopNotificationEngine } from "./notifications";
 import SettingsUI from "./components/SettingsUI";
 
-let unpatchYouBar: (() => void) | null = null;
+const cleanups: (() => void)[] = [];
 
 export function refreshYouBarUI() {
     const Dispatcher = findByProps("dispatch", "subscribe");
@@ -31,21 +31,36 @@ export default {
 
         initNotificationEngine();
 
-        // Sets up instant module interception hook
-        unpatchYouBar = patchYouBar();
+        let attempts = 0;
 
-        // Trigger Flux re-render pass
+        // ServerDrawer polling pattern: Scan Metro repeatedly until component is hooked
+        const scanInterval = setInterval(() => {
+            const patched = rescanAndPatchYouBar(cleanups);
+            attempts++;
+
+            if (patched || attempts > 60) {
+                clearInterval(scanInterval);
+            }
+        }, 100);
+
+        cleanups.push(() => clearInterval(scanInterval));
+
         refreshYouBarUI();
     },
 
     onUnload: () => {
         logger.log("[BetterInbox] Unloading plugin...");
 
-        if (unpatchYouBar) {
-            unpatchYouBar();
-            unpatchYouBar = null;
+        for (const cleanup of cleanups) {
+            try {
+                cleanup();
+            } catch (err) {
+                logger.log(`[BetterInbox] Cleanup error: ${err}`);
+            }
         }
+        cleanups.length = 0;
 
+        resetYouBarPatchState();
         stopNotificationEngine();
         refreshYouBarUI();
     },
