@@ -1,69 +1,144 @@
 import { logger } from "@vendetta";
-import { findByProps } from "@vendetta/metro";
+import { findByProps, findByTypeName, findByName } from "@vendetta/metro";
+import { React } from "@vendetta/metro/common";
+import { after } from "@vendetta/patcher";
 import { storage } from "@vendetta/plugin";
-import { rescanAndPatchYouBar, resetYouBarPatchState } from "./youbar";
-import { initNotificationEngine, stopNotificationEngine } from "./notifications";
-import SettingsUI from "./components/SettingsUI";
+import { getAssetIDByName } from "@vendetta/ui/assets";
+import NotificationCenterUI from "./components/NotificationCenterUI";
 
-const cleanups: (() => void)[] = [];
+let unpatchType: (() => void) | null = null;
+let isPatched = false;
 
-export function refreshYouBarUI() {
-    const Dispatcher = findByProps("dispatch", "subscribe");
-    const UserStore = findByProps("getCurrentUser");
+const FluxDispatcher = findByProps("dispatch", "subscribe", "_actionHandlers");
 
-    const currentUser = UserStore?.getCurrentUser();
+function forceNavigationRerender(): void {
+    if (!FluxDispatcher) return;
 
-    if (Dispatcher?.dispatch && currentUser) {
-        Dispatcher.dispatch({
-            type: "CURRENT_USER_UPDATE",
-            user: currentUser,
+    try {
+        FluxDispatcher.dispatch({
+            type: "OVERLAY_SET_FLUX_STORES_DESERIALIZED",
         });
+        FluxDispatcher.dispatch({
+            type: "USER_SETTINGS_PROTO_UPDATE",
+            settings: { type: 0, proto: {} },
+            partial: true,
+        });
+    } catch (err) {
+        logger.log(`[BetterInbox] Flux dispatch re-render failed: ${err}`);
     }
 }
 
-export default {
-    onLoad: () => {
-        logger.log("[BetterInbox] Plugin loading...");
+function applyTypePatch(targetComponent: any, cleanups: (() => void)[]): boolean {
+    if (unpatchType || !targetComponent?.type) return false;
 
-        storage.showDMButton ??= false;
-        storage.showSettingsButton ??= true;
-        storage.showInboxButton ??= true;
+    logger.log("[BetterInbox] Successfully hooked YouBarNotificationsButton.type");
 
-        initNotificationEngine();
+    unpatchType = after("type", targetComponent, (_, res) => {
+        if (!res?.props?.children) return res;
 
-        let attempts = 0;
+        const Navigation = findByProps("push", "pushLazy", "pop");
+        const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
+        const modalCloseButton =
+            findByProps("getRenderCloseButton")?.getRenderCloseButton ??
+            findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
 
-        // Continuous scanning loop until YouBar component is found in Metro
-        const scanInterval = setInterval(() => {
-            const patched = rescanAndPatchYouBar(cleanups);
-            attempts++;
+        const userSettingsAction = findByProps("openUserSettings");
+        const transitionModule = findByProps("transitionToGuild");
 
-            if (patched || attempts > 60) {
-                clearInterval(scanInterval);
-            }
-        }, 100);
+        const BellIcon = getAssetIDByName("BellIcon") || getAssetIDByName("NotificationBellIcon");
+        const SettingsIcon = getAssetIDByName("SettingsIcon");
+        const ChatIcon = getAssetIDByName("ChatIcon");
 
-        cleanups.push(() => clearInterval(scanInterval));
+        const openInbox = () => {
+            if (!Navigator || !Navigation?.push) return;
+            Navigation.push(() => (
+                <Navigator
+                    initialRouteName="YouBarInbox"
+                    goBackOnBackPress
+                    screens={{
+                        YouBarInbox: {
+                            title: "Inbox",
+                            headerLeft: modalCloseButton?.(() => Navigation.pop()),
+                            render: () => <NotificationCenterUI />,
+                        },
+                    }}
+                />
+            ));
+        };
 
-        refreshYouBarUI();
-    },
+        const IconButton = res.props.children.type;
+        const originalProps = res.props.children.props;
 
-    onUnload: () => {
-        logger.log("[BetterInbox] Unloading plugin...");
+        if (!IconButton) return res;
 
-        for (const cleanup of cleanups) {
-            try {
-                cleanup();
-            } catch (err) {
-                logger.log(`[BetterInbox] Cleanup error: ${err}`);
-            }
+        return (
+            <React.Fragment>
+                {storage.showDMButton && (
+                    <IconButton
+                        key="betterinbox-dm"
+                        variant={originalProps?.variant || "tertiary"}
+                        size={originalProps?.size || "sm"}
+                        icon={ChatIcon}
+                        onPress={() => transitionModule?.transitionToGuild?.("@me")}
+                    />
+                )}
+
+                {storage.showSettingsButton && (
+                    <IconButton
+                        key="betterinbox-settings"
+                        variant={originalProps?.variant || "tertiary"}
+                        size={originalProps?.size || "sm"}
+                        icon={SettingsIcon}
+                        onPress={() => userSettingsAction?.openUserSettings?.()}
+                    />
+                )}
+
+                {storage.showInboxButton ? (
+                    <IconButton
+                        key="betterinbox-inbox"
+                        variant={originalProps?.variant || "tertiary"}
+                        size={originalProps?.size || "sm"}
+                        icon={BellIcon || originalProps?.icon}
+                        onPress={openInbox}
+                    />
+                ) : (
+                    res
+                )}
+            </React.Fragment>
+        );
+    });
+
+    cleanups.push(() => {
+        if (unpatchType) {
+            unpatchType();
+            unpatchType = null;
         }
-        cleanups.length = 0;
+    });
 
-        resetYouBarPatchState();
-        stopNotificationEngine();
-        refreshYouBarUI();
-    },
+    forceNavigationRerender();
+    return true;
+}
 
-    settings: SettingsUI,
-};
+export function rescanAndPatchYouBar(cleanups: (() => void)[]): boolean {
+    if (isPatched) return true;
+
+    // Direct module lookup scan
+    const targetComponent = findByTypeName("YouBarNotificationsButton");
+    if (targetComponent) {
+        if (applyTypePatch(targetComponent, cleanups)) {
+            isPatched = true;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+export function resetYouBarPatchState(): void {
+    isPatched = false;
+    if (unpatchType) {
+        unpatchType();
+        unpatchType = null;
+    }
+    forceNavigationRerender();
+}
