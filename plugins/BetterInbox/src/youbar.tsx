@@ -9,7 +9,7 @@ import NotificationCenterUI from "./components/NotificationCenterUI";
 let unpatchType: (() => void) | null = null;
 
 // ---------------------------------------------------------------------------
-// Flux Navigation Re-render Trigger
+// Flux Re-Render Trigger
 // ---------------------------------------------------------------------------
 
 const FluxDispatcher = findByProps("dispatch", "subscribe", "_actionHandlers");
@@ -32,7 +32,7 @@ function forceNavigationRerender(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Patch Implementation
+// YouBar Patching Logic
 // ---------------------------------------------------------------------------
 
 function applyTypePatch(targetComponent: any) {
@@ -115,7 +115,7 @@ function applyTypePatch(targetComponent: any) {
         );
     });
 
-    // Dispatch re-render immediately once the component is patched
+    // Re-render navigation UI instantly as soon as patch lands
     forceNavigationRerender();
 }
 
@@ -148,8 +148,7 @@ export function patchYouBar(): () => void {
             unpatchMetro();
             unpatchMetro = null;
         }
-
-        // Force Discord to drop custom buttons and re-render stock UI when unmounted
+        // Force navigation to drop custom buttons when plugin unloads
         forceNavigationRerender();
     };
 }
