@@ -33,7 +33,7 @@ export default {
 
         let attempts = 0;
 
-        // ServerDrawer polling pattern: Scan Metro repeatedly until component is hooked
+        // Continuous scanning loop until YouBar component is found in Metro
         const scanInterval = setInterval(() => {
             const patched = rescanAndPatchYouBar(cleanups);
             attempts++;
