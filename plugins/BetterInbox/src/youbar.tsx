@@ -8,6 +8,25 @@ import NotificationCenterUI from "./components/NotificationCenterUI";
 
 let isPatched = false;
 
+const FluxDispatcher = findByProps("dispatch", "subscribe", "_actionHandlers");
+
+export function forceNavigationRerender(): void {
+    if (!FluxDispatcher) return;
+
+    try {
+        FluxDispatcher.dispatch({
+            type: "OVERLAY_SET_FLUX_STORES_DESERIALIZED",
+        });
+        FluxDispatcher.dispatch({
+            type: "USER_SETTINGS_PROTO_UPDATE",
+            settings: { type: 0, proto: {} },
+            partial: true,
+        });
+    } catch (err) {
+        logger.log(`[BetterInbox] Navigation re-render dispatch failed: ${err}`);
+    }
+}
+
 function renderCustomButtons(res: any) {
     if (!res?.props?.children) return res;
 
@@ -83,26 +102,6 @@ function renderCustomButtons(res: any) {
     );
 }
 
-export function linkYouBarAnimation(cleanups: (() => void)[]): boolean {
-    if (isPatched) return true;
-
-    // 1. Primary: Target the YouBar layout animation hook module
-    const animationModule = findByProps("useYouBarAnimation") ?? findByProps("useYouTabBarAnimation");
-    
-    if (animationModule) {
-        const key = animationModule.useYouBarAnimation ? "useYouBarAnimation" : "useYouTabBarAnimation";
-        const unpatchAnim = after(key, animationModule, (_, animRes) => {
-            // When YouBar animation runs, hook the notifications component
-            setupTargetButton(cleanups);
-            return animRes;
-        });
-        cleanups.push(unpatchAnim);
-    }
-
-    // 2. Direct component patch fallback
-    return setupTargetButton(cleanups);
-}
-
 function setupTargetButton(cleanups: (() => void)[]): boolean {
     const targetComp = findByTypeName("YouBarNotificationsButton") || findByName("YouBarNotificationsButton");
 
@@ -121,6 +120,28 @@ function setupTargetButton(cleanups: (() => void)[]): boolean {
     return false;
 }
 
+export function linkYouBarAnimation(cleanups: (() => void)[]): boolean {
+    if (isPatched) return true;
+
+    const animationModule = findByProps("useYouBarAnimation") ?? findByProps("useYouTabBarAnimation");
+    
+    if (animationModule) {
+        const key = animationModule.useYouBarAnimation ? "useYouBarAnimation" : "useYouTabBarAnimation";
+        const unpatchAnim = after(key, animationModule, (_, animRes) => {
+            setupTargetButton(cleanups);
+            return animRes;
+        });
+        cleanups.push(unpatchAnim);
+    }
+
+    return setupTargetButton(cleanups);
+}
+
+export function rescanAndPatchYouBar(cleanups: (() => void)[]): boolean {
+    return linkYouBarAnimation(cleanups);
+}
+
 export function resetYouBarPatchState(): void {
     isPatched = false;
+    forceNavigationRerender();
 }
