@@ -1,7 +1,7 @@
 import { logger } from "@vendetta";
 import { findByProps } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
-import { setupYouBarHooks, resetYouBarPatchState, forceNavigationRerender } from "./youbar";
+import { rescanAndPatchYouBar, resetYouBarPatchState, forceNavigationRerender } from "./youbar";
 import { initNotificationEngine, stopNotificationEngine } from "./notifications";
 import SettingsUI from "./components/SettingsUI";
 
@@ -21,36 +21,41 @@ export default {
 
         initNotificationEngine();
 
-        // High-frequency startup polling
+        // 1. Initial scanning loop
         let attempts = 0;
         const scanInterval = setInterval(() => {
-            const success = setupYouBarHooks(cleanups);
+            const patched = rescanAndPatchYouBar(cleanups);
             attempts++;
-
-            if (success || attempts > 100) {
+            if (patched || attempts > 60) {
                 clearInterval(scanInterval);
             }
-        }, 50);
-
+        }, 100);
         cleanups.push(() => clearInterval(scanInterval));
 
-        // Subscribes to Discord Flux Navigation Dispatcher
-        const Dispatcher = findByProps("dispatch", "subscribe");
-        if (Dispatcher?.subscribe) {
-            const navHandler = () => setupYouBarHooks(cleanups);
+        // 2. Link directly to React Navigation State changes
+        const NavigationContainer = findByProps("useNavigationContainerRef", "NavigationContainer") || findByProps("getRootRef");
+        const FluxDispatcher = findByProps("dispatch", "subscribe");
 
-            Dispatcher.subscribe("NAVIGATION_SWITCH", navHandler);
-            Dispatcher.subscribe("TRACK", navHandler);
-            Dispatcher.subscribe("POST_CONNECTION_OPEN", navHandler);
+        const handleNavigationChange = () => {
+            // Run hook scanner and issue the re-render dispatch
+            rescanAndPatchYouBar(cleanups);
+            forceNavigationRerender();
+        };
+
+        if (FluxDispatcher?.subscribe) {
+            // Triggers every time you switch tabs, open channels, or change screens
+            FluxDispatcher.subscribe("NAVIGATION_SWITCH", handleNavigationChange);
+            FluxDispatcher.subscribe("CHANNEL_SELECT", handleNavigationChange);
+            FluxDispatcher.subscribe("TRACK", handleNavigationChange);
 
             cleanups.push(() => {
-                Dispatcher.unsubscribe("NAVIGATION_SWITCH", navHandler);
-                Dispatcher.unsubscribe("TRACK", navHandler);
-                Dispatcher.unsubscribe("POST_CONNECTION_OPEN", navHandler);
+                FluxDispatcher.unsubscribe("NAVIGATION_SWITCH", handleNavigationChange);
+                FluxDispatcher.unsubscribe("CHANNEL_SELECT", handleNavigationChange);
+                FluxDispatcher.unsubscribe("TRACK", handleNavigationChange);
             });
         }
 
-        refreshYouBarUI();
+        forceNavigationRerender();
     },
 
     onUnload: () => {
