@@ -14,6 +14,7 @@ export function forceNavigationRerender(): void {
     if (!FluxDispatcher) return;
 
     try {
+        // Triggers the same top-level tree update that Retry Render hits
         FluxDispatcher.dispatch({
             type: "OVERLAY_SET_FLUX_STORES_DESERIALIZED",
         });
@@ -23,7 +24,7 @@ export function forceNavigationRerender(): void {
             partial: true,
         });
     } catch (err) {
-        logger.log(`[BetterInbox] Flux dispatch re-render failed: ${err}`);
+        logger.log(`[BetterInbox] Navigation re-render dispatch failed: ${err}`);
     }
 }
 
