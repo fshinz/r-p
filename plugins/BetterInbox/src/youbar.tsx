@@ -8,26 +8,6 @@ import NotificationCenterUI from "./components/NotificationCenterUI";
 
 let isPatched = false;
 
-const FluxDispatcher = findByProps("dispatch", "subscribe", "_actionHandlers");
-
-export function forceNavigationRerender(): void {
-    if (!FluxDispatcher) return;
-
-    try {
-        // Triggers the same top-level tree update that Retry Render hits
-        FluxDispatcher.dispatch({
-            type: "OVERLAY_SET_FLUX_STORES_DESERIALIZED",
-        });
-        FluxDispatcher.dispatch({
-            type: "USER_SETTINGS_PROTO_UPDATE",
-            settings: { type: 0, proto: {} },
-            partial: true,
-        });
-    } catch (err) {
-        logger.log(`[BetterInbox] Navigation re-render dispatch failed: ${err}`);
-    }
-}
-
 function renderCustomButtons(res: any) {
     if (!res?.props?.children) return res;
 
@@ -103,9 +83,27 @@ function renderCustomButtons(res: any) {
     );
 }
 
-export function setupYouBarHooks(cleanups: (() => void)[]): boolean {
+export function linkYouBarAnimation(cleanups: (() => void)[]): boolean {
     if (isPatched) return true;
 
+    // 1. Primary: Target the YouBar layout animation hook module
+    const animationModule = findByProps("useYouBarAnimation") ?? findByProps("useYouTabBarAnimation");
+    
+    if (animationModule) {
+        const key = animationModule.useYouBarAnimation ? "useYouBarAnimation" : "useYouTabBarAnimation";
+        const unpatchAnim = after(key, animationModule, (_, animRes) => {
+            // When YouBar animation runs, hook the notifications component
+            setupTargetButton(cleanups);
+            return animRes;
+        });
+        cleanups.push(unpatchAnim);
+    }
+
+    // 2. Direct component patch fallback
+    return setupTargetButton(cleanups);
+}
+
+function setupTargetButton(cleanups: (() => void)[]): boolean {
     const targetComp = findByTypeName("YouBarNotificationsButton") || findByName("YouBarNotificationsButton");
 
     if (targetComp) {
@@ -117,32 +115,12 @@ export function setupYouBarHooks(cleanups: (() => void)[]): boolean {
             cleanups.push(unpatch);
         }
         isPatched = true;
-        forceNavigationRerender();
         return true;
-    }
-
-    const metroSearch = findByProps("findByTypeName", "findByName");
-    if (metroSearch) {
-        const unpatchType = after("findByTypeName", metroSearch, ([name], result) => {
-            if (name === "YouBarNotificationsButton" && result?.type && !isPatched) {
-                const unpatch = after("type", result, (_, res) => renderCustomButtons(res));
-                cleanups.push(unpatch);
-                isPatched = true;
-                forceNavigationRerender();
-            }
-            return result;
-        });
-        cleanups.push(unpatchType);
     }
 
     return false;
 }
 
-export function rescanAndPatchYouBar(cleanups: (() => void)[]): boolean {
-    return setupYouBarHooks(cleanups);
-}
-
 export function resetYouBarPatchState(): void {
     isPatched = false;
-    forceNavigationRerender();
 }
