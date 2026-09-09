@@ -1,4 +1,3 @@
-
 import { logger } from "@vendetta";
 import { storage } from "@vendetta/plugin";
 import { linkYouBarAnimation, rescanAndPatchYouBar, resetYouBarPatchState, forceNavigationRerender } from "./youbar";
@@ -7,6 +6,7 @@ import SettingsUI from "./components/SettingsUI";
 
 const cleanups: (() => void)[] = [];
 
+// Needed by SettingsUI.tsx to force UI refreshes when toggles change
 export function refreshYouBarUI(): void {
     forceNavigationRerender();
 }
