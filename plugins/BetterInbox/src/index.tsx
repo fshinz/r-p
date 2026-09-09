@@ -1,10 +1,15 @@
+
 import { logger } from "@vendetta";
 import { storage } from "@vendetta/plugin";
-import { linkYouBarAnimation, resetYouBarPatchState } from "./youbar";
+import { linkYouBarAnimation, rescanAndPatchYouBar, resetYouBarPatchState, forceNavigationRerender } from "./youbar";
 import { initNotificationEngine, stopNotificationEngine } from "./notifications";
 import SettingsUI from "./components/SettingsUI";
 
 const cleanups: (() => void)[] = [];
+
+export function refreshYouBarUI(): void {
+    forceNavigationRerender();
+}
 
 export default {
     onLoad: () => {
@@ -16,7 +21,6 @@ export default {
 
         initNotificationEngine();
 
-        // High-frequency check to bind the YouBar animation module as early as possible
         let attempts = 0;
         const scanInterval = setInterval(() => {
             const success = linkYouBarAnimation(cleanups);
