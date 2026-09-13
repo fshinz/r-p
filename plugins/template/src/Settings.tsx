@@ -21,7 +21,7 @@ export interface CustomBadge {
   enabled: boolean;
 }
 
-// Migrate/Initialize storage structure safely
+// Ensure storage is initialized cleanly
 if (Array.isArray(storage.customBadges)) {
   storage.customBadges = storage.customBadges.map((b: any) => ({
     ...b,
@@ -52,7 +52,7 @@ export default function Settings() {
     const trimmedIcon = iconUrl.trim();
 
     if (!trimmedId || !trimmedIcon) {
-      showToast("ID and Icon URL are required!", getAssetIDByName("Small"));
+      showToast("ID and Icon URL/Hash are required!", getAssetIDByName("Small"));
       return;
     }
 
@@ -72,7 +72,6 @@ export default function Settings() {
 
     storage.customBadges = [...storage.customBadges, newBadge];
 
-    // Reset inputs
     setId("");
     setDescription("");
     setIconUrl("");
@@ -95,7 +94,6 @@ export default function Settings() {
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 10 }}>
       <Stack spacing={8}>
-        {/* Info Header */}
         <TableRowGroup title="Custom Badges">
           <TableRow
             label="Profile Badge Injector"
@@ -103,7 +101,6 @@ export default function Settings() {
           />
         </TableRowGroup>
 
-        {/* Form to Add New Badge */}
         <TableRowGroup title="Add New Badge">
           <Stack spacing={4}>
             <TextInput
@@ -112,7 +109,7 @@ export default function Settings() {
               onChange={setId}
             />
             <TextInput
-              placeholder="Icon URL (e.g., https://i.imgur.com/...)"
+              placeholder="Icon URL or CDN Hash (e.g., 5e74e9b6... or http://...)"
               value={iconUrl}
               onChange={setIconUrl}
             />
@@ -138,37 +135,41 @@ export default function Settings() {
           />
         </TableRowGroup>
 
-        {/* Active Badge List */}
         {storage.customBadges && storage.customBadges.length > 0 && (
           <TableRowGroup title="Your Badges (Toggle to Enable/Disable)">
-            {storage.customBadges.map((badge: CustomBadge) => (
-              <TableSwitchRow
-                key={badge.id}
-                label={badge.description || badge.id}
-                subLabel={`ID: ${badge.id}${badge.link ? " • Has Link" : ""}`}
-                value={badge.enabled}
-                onValueChange={() => toggleBadge(badge.id)}
-                icon={
-                  badge.iconUrl ? (
+            {storage.customBadges.map((badge: CustomBadge) => {
+              const isWebUrl = badge.iconUrl.startsWith("http://") || badge.iconUrl.startsWith("https://");
+              const imageSource = isWebUrl
+                ? { uri: badge.iconUrl }
+                : { uri: `https://cdn.discordapp.com/badge-icons/${badge.iconUrl}.png` };
+
+              return (
+                <TableSwitchRow
+                  key={badge.id}
+                  label={badge.description || badge.id}
+                  subLabel={`ID: ${badge.id}${badge.link ? " • Has Link" : ""}`}
+                  value={badge.enabled}
+                  onValueChange={() => toggleBadge(badge.id)}
+                  icon={
                     <RN.Image
-                      source={{ uri: badge.iconUrl }}
+                      source={imageSource}
                       style={{ width: 24, height: 24, borderRadius: 4, marginRight: 8 }}
                     />
-                  ) : undefined
-                }
-                trailing={
-                  <RN.TouchableOpacity
-                    onPress={() => removeBadge(badge.id)}
-                    style={{ paddingLeft: 10 }}
-                  >
-                    <RN.Image
-                      source={getAssetIDByName("TrashIcon")}
-                      style={{ width: 20, height: 20, tintColor: "#ff4d4d" }}
-                    />
-                  </RN.TouchableOpacity>
-                }
-              />
-            ))}
+                  }
+                  trailing={
+                    <RN.TouchableOpacity
+                      onPress={() => removeBadge(badge.id)}
+                      style={{ paddingLeft: 10 }}
+                    >
+                      <RN.Image
+                        source={getAssetIDByName("TrashIcon")}
+                        style={{ width: 20, height: 20, tintColor: "#ff4d4d" }}
+                      />
+                    </RN.TouchableOpacity>
+                  }
+                />
+              );
+            })}
           </TableRowGroup>
         )}
       </Stack>
