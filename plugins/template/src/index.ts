@@ -7,8 +7,9 @@ const unpatches: Array<() => void> = [];
 export default {
   onLoad: () => {
     try {
-      const UserStore = findByProps("getCurrentUser", "getUser") || findByStoreName("UserStore");
-      const UserProfileStore = findByStoreName("UserProfileStore") || findByProps("getUserProfile");
+      const UserStore = findByProps("getCurrentUser") || findByStoreName("UserStore");
+      const UserProfileStore = findByProps("getUserProfile") || findByStoreName("UserProfileStore");
+      const FluxDispatcher = findByProps("dispatch", "subscribe");
 
       if (UserProfileStore && UserStore) {
         const origGetProfile = UserProfileStore.getUserProfile;
@@ -18,11 +19,11 @@ export default {
             const profile = origGetProfile.apply(this, arguments);
 
             try {
-              const currentUserId = UserStore.getCurrentUser?.()?.id;
+              const currentUser = UserStore.getCurrentUser?.();
 
-              // If current user isn't loaded yet or matches target profile ID
-              if (profile && (!currentUserId || userId === currentUserId)) {
-                let existingBadges = Array.isArray(profile.badges) ? [...profile.badges] : [];
+              // Ensure we only touch valid snowflake IDs and target the logged-in user
+              if (currentUser?.id && userId === currentUser.id) {
+                let existingBadges = Array.isArray(profile?.badges) ? [...profile.badges] : [];
                 const customBadges: CustomBadge[] = storage.customBadges || [];
 
                 const formattedCustomBadges = customBadges
@@ -46,15 +47,17 @@ export default {
 
                 const updatedBadges = [...formattedCustomBadges, ...existingBadges];
 
-                Object.defineProperty(profile, "badges", {
-                  value: updatedBadges,
-                  writable: true,
-                  configurable: true,
-                  enumerable: true,
-                });
+                if (profile) {
+                  Object.defineProperty(profile, "badges", {
+                    value: updatedBadges,
+                    writable: true,
+                    configurable: true,
+                    enumerable: true,
+                  });
 
-                if (typeof profile.getBadges === "function") {
-                  profile.getBadges = () => updatedBadges;
+                  if (typeof profile.getBadges === "function") {
+                    profile.getBadges = () => updatedBadges;
+                  }
                 }
               }
             } catch (e) {
@@ -67,6 +70,15 @@ export default {
           unpatches.push(() => {
             UserProfileStore.getUserProfile = origGetProfile;
           });
+
+          // Trigger a local Flux event so the client re-renders profile views instantly
+          const currentUser = UserStore.getCurrentUser?.();
+          if (currentUser?.id && FluxDispatcher?.dispatch) {
+            FluxDispatcher.dispatch({
+              type: "USER_PROFILE_UPDATE",
+              userId: currentUser.id,
+            });
+          }
         }
       }
     } catch (e) {
