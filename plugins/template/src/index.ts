@@ -1,4 +1,4 @@
-import { patcher, storage } from "@vendetta";
+import { storage } from "@vendetta";
 import { findByStoreName, findByProps } from "@vendetta/metro";
 import Settings, { CustomBadge } from "./Settings";
 
@@ -12,7 +12,6 @@ export default {
     try {
       if (!UserProfileStore || !UserStore) return;
 
-      // Direct method swap ensures synchronously computed profile properties are intercepted
       const origGetProfile = UserProfileStore.getUserProfile;
 
       if (typeof origGetProfile === "function") {
@@ -31,19 +30,15 @@ export default {
 
                 if (!badge || !badge.id || !badge.enabled) continue;
 
-                // Prevent duplicate badges
-                existingBadges = existingBadges.filter((b: any) => b && b.id !== badge.id);
-
-                // Check if icon is a full web URL vs a Discord hash
-                const isWebUrl = badge.iconUrl.startsWith("http://") || badge.iconUrl.startsWith("https://");
+                // Strip duplicates
+                existingBadges = existingBadges.filter((b: any) => b && b.id !== badge.id && b.key !== badge.id);
 
                 existingBadges.unshift({
                   id: badge.id,
                   key: badge.id,
                   description: badge.description || "Custom Badge",
-                  // Discord internal image path string or raw URL object
-                  icon: isWebUrl ? badge.iconUrl : badge.iconUrl,
-                  ...(badge.link ? { link: badge.link } : {})
+                  icon: badge.iconUrl,
+                  ...(badge.link ? { link: badge.link } : {}),
                 });
               }
 
@@ -74,5 +69,5 @@ export default {
     unpatches = [];
   },
 
-  settings: Settings
+  settings: Settings,
 };
