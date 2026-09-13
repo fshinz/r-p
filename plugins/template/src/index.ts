@@ -3,8 +3,9 @@ import { findByStoreName, findByProps } from "@vendetta/metro";
 import Settings from "./Settings";
 
 const UserProfileStore = findByStoreName("UserProfileStore") || findByProps("getUserProfile");
+const UserStore = findByStoreName("UserStore") || findByProps("getCurrentUser");
 
-// Default initial state if storage is empty
+// Initialize default storage safely
 storage.customBadges ??= [
     {
         id: "badge_godmode",
@@ -14,45 +15,70 @@ storage.customBadges ??= [
     }
 ];
 
-let unpatches: Function[] = [];
+let unpatches: Array<() => void> = [];
 
 export default {
     onLoad: () => {
-        // Patch UserProfileStore.getUserProfile to inject stored badges
-        if (UserProfileStore) {
-            const unpatchProfile = patcher.after(UserProfileStore, "getUserProfile", (_, profile) => {
+        try {
+            if (!UserProfileStore) {
+                console.log("[CustomBadges] Error: UserProfileStore not found.");
+                return;
+            }
+
+            // Cleanly patch getUserProfile
+            const unpatch = patcher.after(UserProfileStore, "getUserProfile", (args, profile) => {
                 if (!profile) return profile;
 
-                profile.badges = Array.isArray(profile.badges) ? [...profile.badges] : [];
+                // Safely get target user ID from arguments
+                const targetUserId = args[0];
+                const meId = UserStore?.getCurrentUser?.()?.id;
 
+                // Optional: Only inject badges on your own profile (or remove this check for all profiles)
+                if (targetUserId && meId && targetUserId !== meId) {
+                    return profile;
+                }
+
+                // Ensure badges array exists
+                const existingBadges = Array.isArray(profile.badges) ? [...profile.badges] : [];
                 const badgesToInject = storage.customBadges || [];
 
-                for (const customBadge of badgesToInject) {
-                    if (!customBadge.id || !customBadge.iconUrl) continue;
+                for (let i = 0; i < badgesToInject.length; i++) {
+                    const customBadge = badgesToInject[i];
+                    if (!customBadge || !customBadge.id || !customBadge.iconUrl) continue;
 
-                    // Prevent duplicate injection
-                    const exists = profile.badges.some((b: any) => b.id === customBadge.id);
+                    // Prevent duplicate injections
+                    const exists = existingBadges.some((b: any) => b && b.id === customBadge.id);
                     if (!exists) {
-                        profile.badges.push({
+                        existingBadges.push({
                             id: customBadge.id,
                             description: customBadge.description || "Custom Badge",
-                            // Pass the direct URL as the icon hash
                             icon: customBadge.iconUrl,
                             ...(customBadge.link ? { link: customBadge.link } : {})
                         });
                     }
                 }
 
+                profile.badges = existingBadges;
                 return profile;
             });
 
-            unpatches.push(unpatchProfile);
+            if (typeof unpatch === "function") {
+                unpatches.push(unpatch);
+            }
+        } catch (err) {
+            console.log("[CustomBadges Load Error]:", err);
         }
     },
 
     onUnload: () => {
-        for (const unpatch of unpatches) {
-            unpatch?.();
+        for (let i = 0; i < unpatches.length; i++) {
+            try {
+                if (typeof unpatches[i] === "function") {
+                    unpatches[i]();
+                }
+            } catch (e) {
+                console.log("[CustomBadges Unpatch Error]:", e);
+            }
         }
         unpatches = [];
     },
