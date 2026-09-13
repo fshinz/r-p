@@ -18,9 +18,10 @@ export default {
             const profile = origGetProfile.apply(this, arguments);
 
             try {
-              const currentUser = UserStore.getCurrentUser?.();
+              const currentUserId = UserStore.getCurrentUser?.()?.id;
 
-              if (profile && currentUser?.id && userId === currentUser.id) {
+              // If current user isn't loaded yet or matches target profile ID
+              if (profile && (!currentUserId || userId === currentUserId)) {
                 let existingBadges = Array.isArray(profile.badges) ? [...profile.badges] : [];
                 const customBadges: CustomBadge[] = storage.customBadges || [];
 
@@ -45,7 +46,6 @@ export default {
 
                 const updatedBadges = [...formattedCustomBadges, ...existingBadges];
 
-                // Override property descriptor so React components get updated value on render
                 Object.defineProperty(profile, "badges", {
                   value: updatedBadges,
                   writable: true,
@@ -53,7 +53,6 @@ export default {
                   enumerable: true,
                 });
 
-                // Patch getBadges if profile model exposes it as a getter method
                 if (typeof profile.getBadges === "function") {
                   profile.getBadges = () => updatedBadges;
                 }
