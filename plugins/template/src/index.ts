@@ -8,59 +8,71 @@ const UserStore = findByStoreName("UserStore") || findByProps("getCurrentUser");
 let unpatches: Array<() => void> = [];
 
 export default {
-    onLoad: () => {
-        try {
-            if (!UserProfileStore) return;
+  onLoad: () => {
+    try {
+      if (!UserProfileStore || !UserStore) return;
 
-            const unpatch = patcher.after(UserProfileStore, "getUserProfile", (args, profile) => {
-                if (!profile) return profile;
+      // Direct method swap ensures synchronously computed profile properties are intercepted
+      const origGetProfile = UserProfileStore.getUserProfile;
 
-                const targetUserId = args[0];
-                const meId = UserStore?.getCurrentUser?.()?.id;
+      if (typeof origGetProfile === "function") {
+        UserProfileStore.getUserProfile = function (userId: string) {
+          const profile = origGetProfile.apply(this, arguments);
 
-                // Inject only on current user's profile
-                if (targetUserId && meId && targetUserId !== meId) {
-                    return profile;
-                }
+          try {
+            const currentUser = UserStore.getCurrentUser?.();
 
-                const existingBadges = Array.isArray(profile.badges) ? [...profile.badges] : [];
-                const badgesToInject: CustomBadge[] = storage.customBadges || [];
+            if (profile && currentUser?.id && userId === currentUser.id) {
+              let existingBadges = Array.isArray(profile.badges) ? [...profile.badges] : [];
+              const customBadges: CustomBadge[] = storage.customBadges || [];
 
-                for (let i = 0; i < badgesToInject.length; i++) {
-                    const customBadge = badgesToInject[i];
-                    
-                    // Skip invalid or disabled badges
-                    if (!customBadge || !customBadge.id || !customBadge.iconUrl || !customBadge.enabled) {
-                        continue;
-                    }
+              for (let i = 0; i < customBadges.length; i++) {
+                const badge = customBadges[i];
 
-                    const exists = existingBadges.some((b: any) => b && b.id === customBadge.id);
-                    if (!exists) {
-                        existingBadges.push({
-                            id: customBadge.id,
-                            description: customBadge.description || "Custom Badge",
-                            icon: customBadge.iconUrl,
-                            ...(customBadge.link ? { link: customBadge.link } : {})
-                        });
-                    }
-                }
+                if (!badge || !badge.id || !badge.enabled) continue;
 
-                profile.badges = existingBadges;
-                return profile;
-            });
+                // Prevent duplicate badges
+                existingBadges = existingBadges.filter((b: any) => b && b.id !== badge.id);
 
-            if (typeof unpatch === "function") unpatches.push(unpatch);
-        } catch (err) {
-            console.log("[CustomBadges Load Error]:", err);
-        }
-    },
+                // Check if icon is a full web URL vs a Discord hash
+                const isWebUrl = badge.iconUrl.startsWith("http://") || badge.iconUrl.startsWith("https://");
 
-    onUnload: () => {
-        for (let i = 0; i < unpatches.length; i++) {
-            if (typeof unpatches[i] === "function") unpatches[i]();
-        }
-        unpatches = [];
-    },
+                existingBadges.unshift({
+                  id: badge.id,
+                  key: badge.id,
+                  description: badge.description || "Custom Badge",
+                  // Discord internal image path string or raw URL object
+                  icon: isWebUrl ? badge.iconUrl : badge.iconUrl,
+                  ...(badge.link ? { link: badge.link } : {})
+                });
+              }
 
-    settings: Settings
+              profile.badges = existingBadges;
+            }
+          } catch (e) {
+            console.log("[CustomBadges Patch Error]:", e);
+          }
+
+          return profile;
+        };
+
+        unpatches.push(() => {
+          UserProfileStore.getUserProfile = origGetProfile;
+        });
+      }
+    } catch (err) {
+      console.log("[CustomBadges Load Error]:", err);
+    }
+  },
+
+  onUnload: () => {
+    unpatches.forEach((u) => {
+      try {
+        u();
+      } catch (e) {}
+    });
+    unpatches = [];
+  },
+
+  settings: Settings
 };
